@@ -1,5 +1,6 @@
 import Data.List
-import Debug.Trace
+import Data.Maybe
+--import Debug.Trace
 
 data BoolExpr = Var Int | Const Bool | Not BoolExpr | And [BoolExpr] | Or [BoolExpr] deriving (Eq, Ord)
 
@@ -10,18 +11,47 @@ instance Show BoolExpr where
 	show (And es) = concat (map show (sort es))
 	show (Or es)  = "(" ++ concat (intersperse " + " (map show (sort es))) ++ ")"
 
+
 {-
  - Check whether we're certain that truth of one expression implies truth of another
  - Might produce some false negatives; an "implies" (=>) in the strict mathematical
  - sense would be a BoolExpr anyway
  -}
 implies :: BoolExpr -> BoolExpr -> Bool
-(Const x) `implies` (Const y) = x == y
+(Const x) `implies` (Const y) = y || not x
 (And xs)  `implies` (And ys)  = all (`elem` xs) ys
 (And xs)  `implies` y         = y `elem` xs
 (Or xs)   `implies` (Or ys)   = all (`elem` ys) xs
 x         `implies` (Or ys)   = x `elem` ys
 x         `implies` y         = x == y
+
+
+{-
+ - code common to simplification of And and Or expressions
+ -}
+type BinaryBoolRules = BoolExpr -> BoolExpr -> Maybe BoolExpr
+applyBinaryRules ::  BinaryBoolRules -> ([BoolExpr] -> BoolExpr) -> (BoolExpr -> Maybe [BoolExpr]) -> [BoolExpr] -> BoolExpr
+applyBinaryRules rules boxer unboxer input = applyBinaryRules' [] (head input) (tail input) where
+	applyBinaryRules' :: [BoolExpr] -> BoolExpr -> [BoolExpr] -> BoolExpr
+	-- unboxing
+	applyBinaryRules' [] x [] = x
+	-- splicing
+	applyBinaryRules' done current rest | isJust unboxed = applyBinaryRules' [] (head new) (tail new) where
+		unboxed = unboxer current
+		new = done ++ (fromJust unboxed) ++ rest
+	-- we finished applying rules to the list
+	applyBinaryRules' done current [] = boxer (current:done)
+	-- apply the binary rules
+	applyBinaryRules' done current rest = case applyRulesFor current [] rest of
+															Just replacement -> let new = done ++ replacement in applyBinaryRules' [] (head new) (tail new)
+															Nothing -> applyBinaryRules' (current:done) (head rest) (tail rest)
+	--applyRulesFor x done rest | trace ("applyRulesFor " ++ show x ++ ": " ++ show done ++ " | " ++ show rest) False = undefined
+	applyRulesFor _ _ [] = Nothing
+	applyRulesFor x done (r:rest) = case rules x r of
+													Just replacement -> Just $ done ++ replacement:rest
+													Nothing -> case rules r x of
+																		Just replacement -> Just $ done ++ replacement:rest
+																		Nothing -> applyRulesFor x (r:done) rest
 
 {-
  - Apply various identities in order to simplify a boolean expression
@@ -33,48 +63,30 @@ simplify (Const b) = Const b
 simplify (Not (Const b)) = Const (not b)
 simplify (Not e) = Not (simplify e)
 
-simplify (And (x:xs)) = simplifyAnd [] (simplify x) (map simplify xs) where
-	simplifyAnd :: [BoolExpr] -> BoolExpr -> [BoolExpr] -> BoolExpr
-	--simplifyAnd done current rest | trace ("simplifyAnd " ++ show done ++ " | " ++ show current ++ " | " ++ show rest) False = undefined
-	--simplifyAnd done _ _ | length done > 3 = undefined
-	simplifyAnd [] x [] = x
-	simplifyAnd done (Const True) (r:rest) = simplifyAnd done r rest
-	simplifyAnd (d:done) (Const True) [] = simplifyAnd done d []
-	simplifyAnd _ (Const False) _ = Const False
-	simplifyAnd done (And (x:xs)) rest = simplifyAnd done x (xs ++ rest)
-	simplifyAnd done current [] = And (current:done)
-	simplifyAnd done current rest = case simplifyAndWith current [] rest of
-														Const False -> Const False
-														And (x:xs) -> simplifyAnd (current:done) x xs
-														And [] -> And (current:done)
-	simplifyAndWith :: BoolExpr -> [BoolExpr] -> [BoolExpr] -> BoolExpr
-	--simplifyAndWith current acc rest | trace ("simplifyAndWith " ++ show current ++ " | " ++ show acc ++ " | " ++ show rest) False = undefined
-	simplifyAndWith _ acc []       = And acc
-	simplifyAndWith x acc (y:ys)
-		| x `implies` y             = simplifyAndWith x acc ys
-		| y `implies` x             = simplifyAndWith y acc ys
-		| x == Not y || Not x == y  = Const False
-		| otherwise                 = simplifyAndWith x (y:acc) ys
+simplify (And xs) = applyBinaryRules binarySimplifyAnd And unboxAnd (map simplify xs) where
+	unboxAnd (And content) = Just content
+	unboxAnd _ = Nothing
 
-simplify (Or (x:xs)) = simplifyOr [] (simplify x) (map simplify xs) where
-	simplifyOr :: [BoolExpr] -> BoolExpr -> [BoolExpr] -> BoolExpr
-	simplifyOr [] x [] = x
-	simplifyOr done (Const False) (r:rest) = simplifyOr done r rest
-	simplifyOr (d:done) (Const False) [] = simplifyOr done d []
-	simplifyOr _ (Const True) _ = Const True
-	simplifyOr done (Or (x:xs)) rest = simplifyOr done x (xs ++ rest)
-	simplifyOr done current [] = Or (current:done)
-	simplifyOr done current rest = case simplifyOrWith current [] rest of
-														Const True -> Const True
-														Or (x:xs) -> simplifyOr (current:done) x xs
-														Or [] -> Or (current:done)
-	simplifyOrWith :: BoolExpr -> [BoolExpr] -> [BoolExpr] -> BoolExpr
-	simplifyOrWith x acc (y:ys)
-		| x `implies` y             = simplifyOrWith x acc ys
-		| y `implies` x             = simplifyOrWith y acc ys
-		| x == Not y || Not x == y  = Const True
-		| otherwise                 = simplifyOrWith x (y:acc) ys
-	simplifyOrWith _ acc []        = Or acc
+	binarySimplifyAnd :: BinaryBoolRules
+	--binarySimplifyAnd x y | trace ("trying to simplify " ++ show x ++ " AND " ++ show y) False = undefined
+	binarySimplifyAnd x y | x `implies` y = Just $ x
+	binarySimplifyAnd (Const True) x      = Just $ x
+	binarySimplifyAnd (Const False) _     = Just $ Const False
+	binarySimplifyAnd x (Not y) | x == y  = Just $ Const False
+	binarySimplifyAnd _ _                 = Nothing
+
+simplify (Or xs) = applyBinaryRules binarySimplifyOr Or unboxOr (map simplify xs) where
+	unboxOr (Or content) = Just content
+	unboxOr _ = Nothing
+
+	binarySimplifyOr :: BinaryBoolRules
+	--binarySimplifyOr x y | trace ("trying to simplify " ++ show x ++ " OR " ++ show y) False = undefined
+	binarySimplifyOr x y | x `implies` y = Just $ y
+	binarySimplifyOr (Const True) _      = Just $ Const True
+	binarySimplifyOr (Const False) x     = Just $ x
+	binarySimplifyOr x (Not y) | x == y  = Just $ Const True
+	binarySimplifyOr _ _                 = Nothing
+
 
 {-
  - Make sum of products representation by multiplying out all "Or"'s
