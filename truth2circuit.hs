@@ -1,6 +1,9 @@
 import Data.List
 import Data.Maybe
---import Debug.Trace
+
+{-
+ - basic data type representing boolean expressions
+ -}
 
 data BoolExpr = Var Int | Const Bool | Not BoolExpr | And [BoolExpr] | Or [BoolExpr] deriving (Eq, Ord)
 
@@ -10,20 +13,6 @@ instance Show BoolExpr where
 	show (Not e) = "/" ++ show e ++ "\\"
 	show (And es) = concat (map show (sort es))
 	show (Or es)  = "(" ++ concat (intersperse " + " (map show (sort es))) ++ ")"
-
-
-{-
- - Check whether we're certain that truth of one expression implies truth of another
- - Might produce some false negatives; an "implies" (=>) in the strict mathematical
- - sense would be a BoolExpr anyway
- -}
-implies :: BoolExpr -> BoolExpr -> Bool
-(Const x) `implies` (Const y) = y || not x
-(And xs)  `implies` (And ys)  = all (`elem` xs) ys
-(And xs)  `implies` y         = y `elem` xs
-(Or xs)   `implies` (Or ys)   = all (`elem` ys) xs
-x         `implies` (Or ys)   = x `elem` ys
-x         `implies` y         = x == y
 
 
 {-
@@ -43,9 +32,9 @@ applyBinaryRules rules boxer unboxer input = applyBinaryRules' [] (head input) (
 	applyBinaryRules' done current [] = boxer (current:done)
 	-- apply the binary rules
 	applyBinaryRules' done current rest = case applyRulesFor current [] rest of
-															Just replacement -> let new = done ++ replacement in applyBinaryRules' [] (head new) (tail new)
+															Just replacement -> let new = done ++ replacement in
+																						   applyBinaryRules' [] (head new) (tail new)
 															Nothing -> applyBinaryRules' (current:done) (head rest) (tail rest)
-	--applyRulesFor x done rest | trace ("applyRulesFor " ++ show x ++ ": " ++ show done ++ " | " ++ show rest) False = undefined
 	applyRulesFor _ _ [] = Nothing
 	applyRulesFor x done (r:rest) = case rules x r of
 													Just replacement -> Just $ done ++ replacement:rest
@@ -54,33 +43,50 @@ applyBinaryRules rules boxer unboxer input = applyBinaryRules' [] (head input) (
 																		Nothing -> applyRulesFor x (r:done) rest
 
 {-
+ - Check whether we're certain that truth of one expression implies truth of another
+ - Might produce some false negatives; an "implies" (=>) in the strict mathematical
+ - sense would be a BoolExpr anyway
+ -}
+implies :: BoolExpr -> BoolExpr -> Bool
+(Const x) `implies` (Const y) = y || not x
+(And xs)  `implies` (And ys)  = all (`elem` xs) ys
+(And xs)  `implies` y         = y `elem` xs
+(Or xs)   `implies` (Or ys)   = all (`elem` ys) xs
+x         `implies` (Or ys)   = x `elem` ys
+x         `implies` y         = x == y
+
+{-
  - Apply various identities in order to simplify a boolean expression
+ -
+ - Finding an expression corresponding to a truth table is easy (see below); the
+ - hard part is finding a _simple_ expression with that property.
  -}
 simplify :: BoolExpr -> BoolExpr
 
+-- basic identities
 simplify (Var i) = Var i
 simplify (Const b) = Const b
 simplify (Not (Const b)) = Const (not b)
 simplify (Not e) = Not (simplify e)
 
+-- rules for AND expressions
 simplify (And xs) = applyBinaryRules binarySimplifyAnd And unboxAnd (map simplify xs) where
 	unboxAnd (And content) = Just content
 	unboxAnd _ = Nothing
 
 	binarySimplifyAnd :: BinaryBoolRules
-	--binarySimplifyAnd x y | trace ("trying to simplify " ++ show x ++ " AND " ++ show y) False = undefined
 	binarySimplifyAnd x y | x `implies` y = Just $ x
 	binarySimplifyAnd (Const True) x      = Just $ x
 	binarySimplifyAnd (Const False) _     = Just $ Const False
 	binarySimplifyAnd x (Not y) | x == y  = Just $ Const False
 	binarySimplifyAnd _ _                 = Nothing
 
+-- rules for OR expressions
 simplify (Or xs) = applyBinaryRules binarySimplifyOr Or unboxOr (map simplify xs) where
 	unboxOr (Or content) = Just content
 	unboxOr _ = Nothing
 
 	binarySimplifyOr :: BinaryBoolRules
-	--binarySimplifyOr x y | trace ("trying to simplify " ++ show x ++ " OR " ++ show y) False = undefined
 	binarySimplifyOr x y | x `implies` y = Just $ y
 	binarySimplifyOr (Const True) _      = Just $ Const True
 	binarySimplifyOr (Const False) x     = Just $ x
@@ -89,26 +95,26 @@ simplify (Or xs) = applyBinaryRules binarySimplifyOr Or unboxOr (map simplify xs
 
 
 {-
- - Make sum of products representation by multiplying out all "Or"'s
+ - Make sum of products representation by multiplying out all ORs
  -}
-sop :: BoolExpr -> BoolExpr
-sop (And s) = case break isOr s of
-						(_,[]) -> And s
-						(s1,(Or m):s2) -> Or $ map (sop.And.(s1++).(:s2)) m
-				  where
-				  isOr (Or _) = True
-				  isOr _ = False
-sop x = x
+sumOfProducts :: BoolExpr -> BoolExpr
+sumOfProducts (And xs) = case break isOr xs of
+									(_,[]) -> And xs
+									(s1,(Or m):s2) -> Or $ map (sumOfProducts.And.(s1++).(:s2)) m
+	where
+		isOr (Or _) = True
+		isOr _      = False
+sumOfProducts xs = xs
 
 {-
  - Given the values of all variables, compute the truth value of the expression
  -}
 applyExpr :: BoolExpr -> [Bool] -> Bool
-applyExpr (Var i) ins = ins !! i
-applyExpr (Const b) _ = b
-applyExpr (Not e) ins = not $ applyExpr e ins
+applyExpr (Var i) ins  = ins !! i
+applyExpr (Const b) _  = b
+applyExpr (Not e) ins  = not $ applyExpr e ins
 applyExpr (And xs) ins = and $ map (\e -> applyExpr e ins) xs
-applyExpr (Or xs) ins = or $ map (\e -> applyExpr e ins) xs
+applyExpr (Or xs) ins  = or $ map (\e -> applyExpr e ins) xs
 
 {-
  - Helper function: count number of list elements for which predicate is True
@@ -128,8 +134,14 @@ type TruthTable = [([Bool], Bool)]
 
 exprFromTable :: TruthTable -> BoolExpr
 exprFromTable tt = if count id (map snd tt) > (length tt) `div` 2 then productOfSums tt else sumOfProducts tt where
-	productOfSums tt = And [ Or [ if ival then Not (Var inum) else Var inum | (ival, inum) <- zip ins [0..] ] | (ins, out) <- tt, not out ]
-	sumOfProducts tt = Or [ And [ if ival then Var inum else Not (Var inum) | (ival, inum) <- zip ins [0..] ] | (ins, out) <- tt, out ]
+	-- Depending on the number of True outputs, either a product-of-sums or a
+	-- sum-of products translation yields a shorter expression. Since neither is
+	-- particularly complicated, we implement both in order to get a good
+	-- starting point for further simplification.
+	productOfSums tt = And [ sumForInputs ins | (ins, out) <- tt, not out ]
+	sumForInputs ins = Or [ if ival then Not (Var inum) else Var inum | (ival, inum) <- zip ins [0..] ]
+	sumOfProducts tt = Or [ productForInputs ins | (ins, out) <- tt, out ]
+	productForInputs ins = And [ if ival then Var inum else Not (Var inum) | (ival, inum) <- zip ins [0..] ]
 
 tableFromExpr :: BoolExpr -> TruthTable
 tableFromExpr e = map (\ins -> (ins, applyExpr e ins)) (permutations [False,True] (numVariables e)) where
@@ -137,11 +149,11 @@ tableFromExpr e = map (\ins -> (ins, applyExpr e ins)) (permutations [False,True
 	permutations list num = sequence $ replicate num list
 	numVariables = numVariables' 0
 	numVariables' :: Int -> BoolExpr -> Int
-	numVariables' acc (Var i) = if i >= acc then i+1 else acc
+	numVariables' acc (Var i)   = if i >= acc then i+1 else acc
 	numVariables' acc (Const _) = 0
-	numVariables' acc (Not e) = numVariables' acc e
-	numVariables' acc (And es) = maximum $ map (numVariables' acc) es
-	numVariables' acc (Or es)  = maximum $ map (numVariables' acc) es
+	numVariables' acc (Not e)   = numVariables' acc e
+	numVariables' acc (And es)  = maximum $ map (numVariables' acc) es
+	numVariables' acc (Or es)   = maximum $ map (numVariables' acc) es
 
 {-
  - Converting between internal and string representations of truth tables
@@ -155,8 +167,8 @@ showTruthTable :: TruthTable -> String
 showTruthTable = unlines . (map $ unwords . (map (\b -> if b then "1" else "0")) . (\(i,o) -> i++[o]))
 
 {-
+ - Debugging aid
  -}
-
 testExpr :: BoolExpr -> TruthTable -> String
 testExpr e tt = unlines $ map testLine tt where
 	testLine (ins, out) = unwords $ map showBit $ ins ++ [out, applyExpr e ins]
