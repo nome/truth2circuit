@@ -1,3 +1,5 @@
+module Main where
+
 import Data.List
 import Data.Maybe
 
@@ -182,4 +184,6 @@ testExpr e tt = unlines $ map testLine tt where
 	testLine (ins, out) = unwords $ map showBit $ ins ++ [out, applyExpr e ins]
 	showBit b = if b then "1" else "0"
 
-
+main = do
+	interact $ show.simplify.sumOfProducts.exprFromTable.parseTruthTable
+	putStr "\n"
