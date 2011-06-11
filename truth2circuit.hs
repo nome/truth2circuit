@@ -176,6 +176,15 @@ parseTruthTable = map (splitLast . map (=='1') . filter (`elem` "01")) . lines w
 showTruthTable :: TruthTable -> String
 showTruthTable = unlines . (map $ unwords . (map (\b -> if b then "1" else "0")) . (\(i,o) -> i++[o]))
 
+-- for truth tables with multiple outputs
+parseMultiTruthTable :: String -> [TruthTable]
+parseMultiTruthTable str = map tableForOutput [0..(numOuts-1)] where
+	numIns, numOuts :: Int
+	numIns = truncate $ logBase 2 $ fromInteger.toInteger $ length (lines str)
+	numOuts = (length $ convertLine (head (lines str))) - numIns
+	convertLine = map (=='1') . filter (`elem` "01")
+	tableForOutput o = map ((uncurry $ (.(!!o)) . (,)) . splitAt numIns . convertLine) (lines str)
+
 {-
  - Debugging aid
  -}
@@ -184,6 +193,4 @@ testExpr e tt = unlines $ map testLine tt where
 	testLine (ins, out) = unwords $ map showBit $ ins ++ [out, applyExpr e ins]
 	showBit b = if b then "1" else "0"
 
-main = do
-	interact $ show.simplify.sumOfProducts.exprFromTable.parseTruthTable
-	putStr "\n"
+main = interact $ unlines . map (show.simplify.sumOfProducts.exprFromTable) . parseMultiTruthTable
