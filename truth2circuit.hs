@@ -1,7 +1,24 @@
+{-# LANGUAGE TupleSections, FlexibleContexts #-}
 module Main where
 
 import Data.List
 import Data.Maybe
+import Control.Monad.State
+import Data.Functor
+import Data.Array.ST
+import Data.Array.Unboxed
+import Debug.Trace
+
+{-
+ - Helper function: interleave two lists, starting with the first
+ - the result list contains elements from both arguments in turn and terminates as soon as one of the arguments does
+ -}
+interleave :: [a] -> [a] -> [a]
+interleave = interleave1 where
+	interleave1 [] _ = []
+	interleave1 (x:xs) ys = x:(interleave2 xs ys)
+	interleave2 _ [] = []
+	interleave2 xs (y:ys) = y:(interleave1 xs ys)
 
 {-
  - basic data type representing boolean expressions
@@ -241,7 +258,220 @@ createBindings bes = (((map unvar).snd.unbox) toplevel , reverse others) where
 
 
 {-
+ - Now, towards a graphical representation of a BoolExpr as logic gates
  -}
+
+center n c s       = let p = (n - length s) `div` 2 in replicate p ' ' ++ s ++ replicate (n - length s - p) c
+justifyLeft n c s  = s ++ replicate (n - length s) c
+justifyRight n c s = replicate (n - length s) c ++ s
+
+visual :: BoolExpr -> Int ->  [String]
+visual (And [_,_]) o = ["    __  " ++ center 3 ' ' (show (Var o)),
+                        "---|  -  | ",
+                        "   |   )-^-",
+                        "---|__-    "]
+visual (And [_,_,_]) o = ["    __  " ++ center 3 ' ' (show (Var o)),
+                          "---|  -  | ",
+                          "---|   )-^-",
+                          "---|__-    "]
+visual (And x) o =     ["        " ++ center 3 ' ' (show (Var o)),
+                        " ERROR   | ",
+                        " AND    -^-",
+                        " " ++ justifyLeft 10 ' ' (show (length x))]
+visual (Or [_,_])  o = ["   ___  " ++ center 3 ' ' (show (Var o)),
+                        "--\\   -. | ",
+                        "   )    >^-",
+                        "--/___-'   "]
+visual (Or [_,_,_])  o = ["   ___  " ++ center 3 ' ' (show (Var o)),
+                          "--\\   -. | ",
+                          "---)    >^-",
+                          "--/___-'   "]
+visual (Or x) o =      ["        " ++ center 3 ' ' (show (Var o)),
+                        " ERROR   | ",
+                        " OR     -^-",
+                        " " ++ justifyLeft 10 ' ' (show (length x))]
+visual (Not _) o = ["        " ++ center 3 ' ' (show (Var o)),
+                    "         | ",
+                    "----|>o--^-",
+                    "           "]
+
+visual (Var i) _ = ["           ",
+                    "           ",
+                    justifyRight 5 ' ' (show (Var i)) ++ " >----",
+                    "           "]
+
+visual (Const True) _ =  ["           ",
+                          "           ",
+                          " True >----",
+                          "           "]
+visual (Const False) _ = ["           ",
+                          "           ",
+                          "False >----",
+                          "           "]
+-- drawing functions should work with any mutable array type
+type Arena a = a (Int, Int) Char
+
+-- turn a list of variable definitions (i.e. each BoolExpr represents a variable binding) into an ASCII art drawing
+bindingsToCircuit :: [BoolExpr] -> String
+bindingsToCircuit input = showArray $ runSTUArray draw where
+
+	l :: [[(BoolExpr,Int)]]
+	l = layout input
+
+	-- returns a list of columns, each of which is a list of (gate,output var) pairs
+	layout :: [BoolExpr] -> [[(BoolExpr,Int)]]
+	layout = reverse . map reverse . layout' 0 [[]] where
+		layout' _ acc [] = acc
+		layout' n (cur:done) (x:xs) = if isVar x
+		                                  then layout' (n+1) (((sortInputs x,n):cur):done) xs
+		                                  else layout' (n+1) (insert (snd $ unbox x) (sortInputs x,n) [] (reverse (cur:done))) xs
+		insert _ x done [] = [x]:done
+		insert sf x done (y:ys) = if null sf
+		                              then (reverse ys) ++ (x:y):done
+		                              else insert (filter (not.(`isIn` y)) sf) x (y:done) ys
+		isIn (Var i) = any ((==i).snd)
+		isIn _ = const True -- just in case we get fed unexpected input
+		isVar (Var _) = True
+		isVar _ = False
+		sortInputs x = let (boxer,content) = unbox x in boxer $ sort content
+
+	-- the easy part: convert final 2D char array into string
+	showArray :: IArray a Char => a (Int,Int) Char -> String
+	showArray a = unlines $ map (\y -> map ((a!).(,y)) [xmin..xmax]) [ymin..ymax] where
+		((xmin,ymin), (xmax,ymax)) = bounds a
+
+	-- list of pass-through connections in each column
+	-- a pass-through connection starts in the column *after* the one containing the output
+	-- and ends in the column *before* the last one consuming it
+	passThrough :: [[Int]]
+	passThrough = reverse $ foldl pt [] [0 .. length l - 1] where
+		pt [] _ = [[]]
+		pt (a:as) c = (:a:as) $ filter ((>c).lastConsume) (a ++  (map snd (l!!(c-1))))
+		lastConsume x = case findIndices (references x) l of { [] -> -1; y -> maximum y }
+		references i c = any (elem (Var i) . snd . unbox . fst) c
+
+	-- for each column, contains a list of mappings out->[in] from the outputs of that column to their respective inputs
+	-- (where out and in are visual row numbers)
+	connections :: [[(Int,[Int])]]
+	connections = map (uncurry connsBetween) $ zip (zip l passThrough) (tail (zip l passThrough)) where
+		connsBetween (out,outpt) (ins,inpt) = connsFromGates ++ connsFromPass where
+			connsFromGates  = [ (n*visualHeight+visualOutput,       connsToVar outvar) | ((_,outvar),n) <- zip out   [0..] ]
+			connsFromPass   = [ ((length out)*visualHeight + n + 1, connsToVar ptvar)  | (ptvar,n)      <- zip outpt [0..] ]
+			connsToVar var  = connsToGates ++ connsToPass where
+				connsToGates = [ n*visualHeight + ((visualInputs be)!!m) | ((be,_),n) <- zip ins [0..], m <- findRefs var be]
+				connsToPass  = [ (length ins)*visualHeight + n + 1       | (var',n)   <- zip inpt [0..], var' == var        ]
+				findRefs var = (elemIndices (Var var)) . snd . unbox
+		-- row numbers of in/outputs relative to the top of the respective visual
+		visualOutput               = 3
+		visualInputs (Not _)       = [3]
+		visualInputs (And [_,_])   = [2,4]
+		visualInputs (And [_,_,_]) = [2,3,4]
+		visualInputs (Or  [_,_])   = [2,4]
+		visualInputs (Or  [_,_,_]) = [2,3,4]
+		visualInputs x             = trace ("ERROR: can't get visual inputs of " ++ show x) []
+
+	-- number of rows we need for the visual represenation of each column
+	colHeights :: [Int]
+	colHeights = [ visualHeight*(length gates) + (length passes) | (gates, passes) <- zip l passThrough ]
+
+	-- space needed after each column in order to draw all connections
+	interColWidths :: [Int]
+	interColWidths = map (\conns -> 2 * (length conns + length (collisions conns))) connections
+
+	-- when we have an output on the left and an input on the right on the same row,
+	-- we have to take care to keep all the lines separate
+	collisions conns = do
+		((out,_), bp)      <- zip conns [0..]
+		((out',ins'), bp') <- zip conns [0..]
+		guard $ bp > bp'
+		guard $ out `elem` ins'
+		return (out', bp)
+
+	visualWidth, visualHeight :: Int
+	visualWidth = 11
+	visualHeight = 4
+
+	draw :: (MArray a Char m) => m (Arena a)
+	draw = do
+		arena <- newArray ((1,1), (visualWidth*(length l) + sum interColWidths, maximum colHeights)) ' '
+		bounds <- getBounds arena
+		--trace ("array dimensions are " ++ show (bounds)) return ()
+		foldM_ (drawColumn arena) 1 (zip3 l passThrough (interColWidths++[0]))
+		foldM_ (drawConnectionsAt arena) (visualWidth+1) (zip connections interColWidths)
+		return arena
+
+	drawConnectionsAt :: (MArray a Char m) => Arena a -> Int -> ([(Int,[Int])], Int) -> m Int
+	drawConnectionsAt arena xmin (conns, space) = do
+		let xmax = xmin + space - 1
+		let connect (ca,aas) ((from,to),n) = case lookup from (collisions conns) of
+		                                      Nothing -> drawConnectionsFrom arena (xmin+n) xmin xmax from to >> return (ca,aas)
+		                                      Just bp -> do
+		                                          let taboo = (aas++) $ join $ map (uncurry (:)) $ filter ((/= from).fst) conns
+		                                          let preferred = sum to `div` length to
+		                                          let cands = interleave [preferred,preferred-1..1] [preferred+1,preferred+2..(maximum colHeights)]
+		                                          if null (cands \\ taboo)
+		                                             then do
+		                                                writeArray arena (xmin, from) 'o'
+		                                                forM_ (zip (show from) [xmin+1..]) (\(c,x) -> writeArray arena (x,from) c)
+		                                                forM_ to (\t -> writeArray arena (xmax, t) 'o' >>
+		                                                                forM_ (zip (reverse (show from)) [xmax-1,xmax-2..])
+		                                                                      (\(c,x) -> writeArray arena (x,t) c))
+		                                                return (ca+2,aas)
+		                                             else do
+		                                                let avoidAt = head $ cands \\ taboo
+		                                                drawConnectionsFrom arena (xmin+bp-1) xmin      (xmin+bp-1) from    [avoidAt]
+		                                                drawConnectionsFrom arena (xmin+ca+1) (xmin+bp) xmax        avoidAt to
+		                                                return (ca+2,avoidAt:aas)
+		foldM_ connect (2 + length conns, []) (zip conns [0,2..])
+		return (xmax+visualWidth+1)
+
+	drawConnectionsFrom :: (MArray a Char m) => Arena a -> Int -> Int -> Int -> Int -> [Int] -> m ()
+	drawConnectionsFrom _ _ _ _ _ [] = return ()
+	drawConnectionsFrom arena branchAt startX endX startY endYs = do
+		let top = (minimum (startY:endYs))
+		let bottom = (maximum (startY:endYs))
+		-- draw horizontal line from output to branch
+		drawLine arena True startX (branchAt-1) startY
+		-- draw horizontal lines from branch to inputs
+		forM_ endYs $ drawLine arena True (branchAt+1) endX
+		if top == bottom
+			then drawLine arena True branchAt branchAt top
+			else do
+				-- draw vertical branching line
+				drawLine arena False top bottom branchAt
+				-- replace top corner with a nicer symbol, if appropriate
+				if top == startY && top `elem` endYs
+					then return ()
+					else writeArray arena (branchAt, top) $ if top == startY then '.' else ','
+				-- replace bottom corner with a nicer symbol, if appropriate
+				if bottom == startY && bottom `elem` endYs
+					then return ()
+					else writeArray arena (branchAt, bottom) $ if bottom == startY then '’' else '`'
+				-- replace branch point with a * (i.e. a dot)
+				sequence_ [ writeArray arena (branchAt, y) '*' | y <- startY:endYs, y /= top || (top == startY && top `elem` endYs), y /= bottom || (bottom == startY && bottom `elem` endYs) ]
+
+	drawColumn :: (MArray a Char m) => Arena a -> Int -> ([(BoolExpr,Int)], [Int], Int) -> m Int
+	drawColumn arena xmin (col, passes, spaceAfter) = do
+		let xmax = xmin + visualWidth - 1
+		mapM_ (\(ymin,(be,o)) -> drawBoolExpr arena xmin ymin be o) $ zip [1,1+visualHeight ..] col
+		let bottom = visualHeight*(length col)
+		mapM_ (drawLine arena True xmin xmax) [bottom+1 .. bottom+(length passes)]
+		return (xmax + spaceAfter + 1)
+
+	drawBoolExpr :: (MArray a Char m) => Arena a -> Int -> Int -> BoolExpr -> Int -> m ()
+	drawBoolExpr arena xmin ymin be o = forM_ (zip [ymin..] (visual be o)) (\(y,l) -> forM_ (zip [xmin..] l) (\(x,c) -> writeArray arena (x,y) c))
+
+	drawLine :: (MArray a Char m) => Arena a -> Bool -> Int -> Int -> Int -> m ()
+	drawLine arena horiz min max at = forM_ [min..max] (\o -> do
+		let pos = if horiz then (o,at) else (at,o)
+		--trace ("drawing line at " ++ show pos) return ()
+		current <- readArray arena pos
+		writeArray arena pos $ case current of
+		                            '|' -> if horiz then '+' else '!'
+		                            '-' -> if horiz then '!' else '+'
+		                            ' ' -> if horiz then '-' else '|'
+		                            _   -> '!' -- ! means there's a bug in layout/drawing code
+		)
 
 showBindings :: [BoolExpr] -> String
 showBindings = unlines . map (\(i,val) -> (show (Var i)) ++ " = " ++ show val) . zip [0..]
@@ -250,6 +480,7 @@ handleInput :: String -> IO ()
 handleInput input = do
 	let exprs    = map (simplify.sumOfProducts.exprFromTable) (parseMultiTruthTable input)
 	let (evars, bindings) = createBindings (map toTernary exprs)
+	let circuit  = bindingsToCircuit bindings
 	putStrLn $ replicate 80 '='
 	putStrLn "The truth table is generated by the following expressions:"
 	putStrLn $ replicate 80 '-'
@@ -259,5 +490,10 @@ handleInput input = do
 	putStrLn "Subdivided into variable bindings implementable by logic gates:"
 	putStrLn $ replicate 80 '-'
 	putStr $ showBindings bindings
+	putStrLn ""
+	putStrLn $ replicate 80 '='
+	putStrLn "The corresponding circuit looks like this:"
+	putStrLn $ replicate 80 '-'
+	putStr circuit
 
 main = getContents >>= handleInput
