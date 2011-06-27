@@ -448,7 +448,7 @@ bindingsToCircuit input = showArray $ runSTUArray draw where
 				-- replace bottom corner with a nicer symbol, if appropriate
 				if bottom == startY && bottom `elem` endYs
 					then return ()
-					else writeArray arena (branchAt, bottom) $ if bottom == startY then '’' else '`'
+					else writeArray arena (branchAt, bottom) $ '\'' --if bottom == startY then '’' else '`'
 				-- replace branch point with a * (i.e. a dot)
 				sequence_ [ writeArray arena (branchAt, y) '*' | y <- startY:endYs, y /= top || (top == startY && top `elem` endYs), y /= bottom || (bottom == startY && bottom `elem` endYs) ]
 
