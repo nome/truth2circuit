@@ -97,10 +97,10 @@ simplify (Or xs) = applyBinaryRules binarySimplifyOr Or unboxOr (map simplify xs
 	binarySimplifyOr (Const True) _      = Just $ Const True
 	binarySimplifyOr (Const False) x     = Just $ x
 	binarySimplifyOr x (Not y) | x == y  = Just $ Const True
-	binarySimplifyOr x (And ys) | Not x `elem` ys = Just $ Or [x, And $ filter (/= Not x) ys]
-	binarySimplifyOr (Not x) (And ys) | x `elem` ys = Just $ Or [Not x, And $ filter (/= x) ys]
+	binarySimplifyOr x (And ys) | Not x `elem` ys = Just $ simplify $ Or [x, And $ filter (/= Not x) ys]
+	binarySimplifyOr (Not x) (And ys) | x `elem` ys = Just $ simplify $ Or [Not x, And $ filter (/= x) ys]
 	-- try factoring out common terms and simplifying the rest
-	binarySimplifyOr (And xs) (And ys) | isSane && isJust partsimp = Just $ sumOfProducts $ And $ (fromJust partsimp):common where
+	binarySimplifyOr (And xs) (And ys) | isSane && isJust partsimp = Just $ simplify $ sumOfProducts $ And $ (fromJust partsimp):common where
 		common = intersect xs ys
 		(xs', ys') = (xs \\ common, ys \\ common)
 		isSane = not $ null common || null xs' || null ys'
