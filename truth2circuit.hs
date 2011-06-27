@@ -376,7 +376,7 @@ bindingsToCircuit input = showArray $ runSTUArray draw where
 
 	-- space needed after each column in order to draw all connections
 	interColWidths :: [Int]
-	interColWidths = map (\conns -> 2 * (length conns + length (collisions conns))) connections
+	interColWidths = map (\conns -> 2 * (length conns + 2 * length (collisions conns))) connections
 
 	-- when we have an output on the left and an input on the right on the same row,
 	-- we have to take care to keep all the lines separate
@@ -403,8 +403,9 @@ bindingsToCircuit input = showArray $ runSTUArray draw where
 	drawConnectionsAt :: (MArray a Char m) => Arena a -> Int -> ([(Int,[Int])], Int) -> m Int
 	drawConnectionsAt arena xmin (conns, space) = do
 		let xmax = xmin + space - 1
-		let connect (ca,aas) ((from,to),n) = case lookup from (collisions conns) of
-		                                      Nothing -> drawConnectionsFrom arena (xmin+n) xmin xmax from to >> return (ca,aas)
+		let collWidth = 2 * (length (collisions conns))
+		let connect (n,m,aas) (from,to) = case lookup from (collisions conns) of
+		                                      Nothing -> drawConnectionsFrom arena (xmin+collWidth+n) xmin xmax from to >> return (n+2,m,aas)
 		                                      Just bp -> do
 		                                          let taboo = (aas++) $ join $ map (uncurry (:)) $ filter ((/= from).fst) conns
 		                                          let preferred = sum to `div` length to
@@ -416,13 +417,14 @@ bindingsToCircuit input = showArray $ runSTUArray draw where
 		                                                forM_ to (\t -> writeArray arena (xmax, t) 'o' >>
 		                                                                forM_ (zip (reverse (show from)) [xmax-1,xmax-2..])
 		                                                                      (\(c,x) -> writeArray arena (x,t) c))
-		                                                return (ca+2,aas)
+		                                                return (n,m+2,aas)
 		                                             else do
 		                                                let avoidAt = head $ cands \\ taboo
-		                                                drawConnectionsFrom arena (xmin+bp-1) xmin      (xmin+bp-1) from    [avoidAt]
-		                                                drawConnectionsFrom arena (xmin+ca+1) (xmin+bp) xmax        avoidAt to
-		                                                return (ca+2,avoidAt:aas)
-		foldM_ connect (2 + length conns, []) (zip conns [0,2..])
+		                                                let center = ((xmin+xmax) `div` 2)
+		                                                drawConnectionsFrom arena (xmin+m) xmin       center  from    [avoidAt]
+		                                                drawConnectionsFrom arena (xmax-m) (center+1) xmax    avoidAt to
+		                                                return (n,m+2,avoidAt:aas)
+		foldM_ connect (collWidth, 0, []) conns
 		return (xmax+visualWidth+1)
 
 	drawConnectionsFrom :: (MArray a Char m) => Arena a -> Int -> Int -> Int -> Int -> [Int] -> m ()
