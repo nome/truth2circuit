@@ -64,7 +64,7 @@ x         `implies` y         = x == y
 {-
  - Apply various identities in order to simplify a boolean expression
  -
- - Finding an expression corresponding to a truth table is easy (see below); the
+ - Finding an expression corresponding to a truth table is easy (see exprFromTable below); the
  - hard part is finding a _simple_ expression with that property.
  -}
 simplify :: BoolExpr -> BoolExpr
@@ -136,7 +136,6 @@ applyExpr (Or xs) ins  = or $ map (\e -> applyExpr e ins) xs
 count :: Enum b => (a -> Bool) -> [a] -> b
 count pred = foldl (\c e -> if pred e then succ c else c) (toEnum 0)
 
-
 {-
  - Some stuff for working with truth tables
  -}
@@ -158,16 +157,17 @@ exprFromTable tt = if count id (map snd tt) > (length tt) `div` 2 then productOf
 	productForInputs ins = And [ if ival then Var inum else Not (Var inum) | (ival, inum) <- zip ins [0..] ]
 
 tableFromExpr :: BoolExpr -> TruthTable
-tableFromExpr e = map (\ins -> (ins, applyExpr e ins)) (permutations [False,True] (numVariables e)) where
+tableFromExpr e = map (\ins -> (ins, applyExpr e ins)) (permutations [False,True] (maxVar e + 1)) where
 	permutations :: [a] -> Int -> [[a]]
 	permutations list num = sequence $ replicate num list
-	numVariables = numVariables' 0
-	numVariables' :: Int -> BoolExpr -> Int
-	numVariables' acc (Var i)   = if i >= acc then i+1 else acc
-	numVariables' acc (Const _) = 0
-	numVariables' acc (Not e)   = numVariables' acc e
-	numVariables' acc (And es)  = maximum $ map (numVariables' acc) es
-	numVariables' acc (Or es)   = maximum $ map (numVariables' acc) es
+
+maxVar :: BoolExpr -> Int
+maxVar = maxVar' (-1) where
+	maxVar' acc (Var i)   = max acc i
+	maxVar' acc (Const _) = -1
+	maxVar' acc (Not e)   = maxVar' acc e
+	maxVar' acc (And es)  = maximum $ map (maxVar' acc) es
+	maxVar' acc (Or es)   = maximum $ map (maxVar' acc) es
 
 {-
  - Converting between internal and string representations of truth tables
@@ -186,15 +186,12 @@ parseMultiTruthTable str = map tableForOutput [0..(numOuts-1)] where
 	numIns, numOuts :: Int
 	numIns = truncate $ logBase 2 $ fromInteger.toInteger $ length (lines str)
 	numOuts = (length $ convertLine (head (lines str))) - numIns
+	convertLine :: String -> [Bool]
 	convertLine = map (=='1') . filter (`elem` "01")
+	tableForOutput :: Int -> TruthTable
 	tableForOutput o = map ((uncurry $ (.(!!o)) . (,)) . splitAt numIns . convertLine) (lines str)
 
 {-
- - Debugging aid
  -}
-testExpr :: BoolExpr -> TruthTable -> String
-testExpr e tt = unlines $ map testLine tt where
-	testLine (ins, out) = unwords $ map showBit $ ins ++ [out, applyExpr e ins]
-	showBit b = if b then "1" else "0"
 
 main = interact $ unlines . map (show.simplify.sumOfProducts.exprFromTable) . parseMultiTruthTable
