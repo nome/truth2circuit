@@ -10,10 +10,14 @@ import Data.Maybe
 data BoolExpr = Var Int | Const Bool | Not BoolExpr | And [BoolExpr] | Or [BoolExpr] deriving (Eq, Ord)
 
 instance Show BoolExpr where
-	show (Var i) = [ ['a'..] !! i ]
+	show (Var i) = (concatMap (sequence . flip replicate ['a'..'z']) [1..]) !! i
 	show (Const b) = show b
 	show (Not e) = "/" ++ show e ++ "\\"
-	show (And es) = concat (map show (sort es))
+	show (And []) = "!EMPTY AND!"
+	show (And [x]) = "!AND " ++ show x ++ "!"
+	show (And es) = concat (intersperse " " (map show (sort es)))
+	show (Or [])  = "!EMPTY OR!"
+	show (Or [x]) = "!OR " ++ show x ++ "!"
 	show (Or es)  = "(" ++ concat (intersperse " + " (map show (sort es))) ++ ")"
 
 
