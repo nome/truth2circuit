@@ -198,8 +198,13 @@ maxVar = maxVar' (-1) where
  - Converting between internal and string representations of truth tables
  -}
 
+-- filter out empty lines and comments
+isTableLine []      = False
+isTableLine ('#':_) = False
+isTableLine _       = True
+
 parseTruthTable :: String -> TruthTable
-parseTruthTable = map (splitLast . map (=='1') . filter (`elem` "01")) . lines where
+parseTruthTable = map (splitLast . map (=='1') . filter (`elem` "01")) . (filter isTableLine) . lines where
 	splitLast l = (uncurry $ (.head) . (,)) $ splitAt (length l - 1) l
 
 showTruthTable :: TruthTable -> String
@@ -208,13 +213,14 @@ showTruthTable = unlines . (map $ unwords . (map (\b -> if b then "1" else "0"))
 -- for truth tables with multiple outputs
 parseMultiTruthTable :: String -> [TruthTable]
 parseMultiTruthTable str = map tableForOutput [0..(numOuts-1)] where
+	rows = filter isTableLine (lines str)
 	numIns, numOuts :: Int
-	numIns = truncate $ logBase 2 $ fromInteger.toInteger $ length (lines str)
-	numOuts = (length $ convertLine (head (lines str))) - numIns
+	numIns = truncate $ logBase 2 $ fromInteger.toInteger $ length rows
+	numOuts = (length $ convertLine (head rows)) - numIns
 	convertLine :: String -> [Bool]
 	convertLine = map (=='1') . filter (`elem` "01")
 	tableForOutput :: Int -> TruthTable
-	tableForOutput o = map ((uncurry $ (.(!!o)) . (,)) . splitAt numIns . convertLine) (lines str)
+	tableForOutput o = map ((uncurry $ (.(!!o)) . (,)) . splitAt numIns . convertLine) rows
 
 
 {-
