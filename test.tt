@@ -1,0 +1,10 @@
+# simple test truth table
+# output is True if at least two of the inputs are True
+000 0
+001 0
+010 0
+011 1
+100 0
+101 1
+110 1
+111 1
