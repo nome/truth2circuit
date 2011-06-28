@@ -411,6 +411,7 @@ bindingsToCircuit input = showArray $ runSTUArray draw where
 		guard $ out `elem` ins'
 		return (out', bp)
 
+   -- dimensions of visual gate representations
 	visualWidth, visualHeight :: Int
 	visualWidth = 11
 	visualHeight = 4
@@ -419,11 +420,11 @@ bindingsToCircuit input = showArray $ runSTUArray draw where
 	draw = do
 		arena <- newArray ((1,1), (visualWidth*(length l) + sum interColWidths, maximum colHeights)) ' '
 		bounds <- getBounds arena
-		--trace ("array dimensions are " ++ show (bounds)) return ()
 		foldM_ (drawColumn arena) 1 (zip3 l passThrough (interColWidths++[0]))
 		foldM_ (drawConnectionsAt arena) (visualWidth+1) (zip connections interColWidths)
 		return arena
 
+	-- draw a given set of connections between two columns of gates
 	drawConnectionsAt :: (MArray a Char m) => Arena a -> Int -> ([(Int,[Int])], Int) -> m Int
 	drawConnectionsAt arena xmin (conns, space) = do
 		let xmax = xmin + space - 1
@@ -451,6 +452,7 @@ bindingsToCircuit input = showArray $ runSTUArray draw where
 		foldM_ connect (collWidth, 0, []) conns
 		return (xmax+visualWidth+1)
 
+	-- draw connections starting at a given output
 	drawConnectionsFrom :: (MArray a Char m) => Arena a -> Int -> Int -> Int -> Int -> [Int] -> m ()
 	drawConnectionsFrom _ _ _ _ _ [] = return ()
 	drawConnectionsFrom arena branchAt startX endX startY endYs = do
@@ -476,6 +478,7 @@ bindingsToCircuit input = showArray $ runSTUArray draw where
 				-- replace branch point with a * (i.e. a dot)
 				sequence_ [ writeArray arena (branchAt, y) '*' | y <- startY:endYs, y /= top || (top == startY && top `elem` endYs), y /= bottom || (bottom == startY && bottom `elem` endYs) ]
 
+	-- draw all gates in a given column
 	drawColumn :: (MArray a Char m) => Arena a -> Int -> ([(BoolExpr,Int)], [Int], Int) -> m Int
 	drawColumn arena xmin (col, passes, spaceAfter) = do
 		let xmax = xmin + visualWidth - 1
@@ -484,13 +487,15 @@ bindingsToCircuit input = showArray $ runSTUArray draw where
 		mapM_ (drawLine arena True xmin xmax) [bottom+1 .. bottom+(length passes)]
 		return (xmax + spaceAfter + 1)
 
+	-- draw a single gate
 	drawBoolExpr :: (MArray a Char m) => Arena a -> Int -> Int -> BoolExpr -> Int -> m ()
 	drawBoolExpr arena xmin ymin be o = forM_ (zip [ymin..] (visual be o)) (\(y,l) -> forM_ (zip [xmin..] l) (\(x,c) -> writeArray arena (x,y) c))
 
+	-- draw a horizontal or vertical line, inserting crossings (+) as needed
+	-- and marking any other (unintentional) collisions with a !
 	drawLine :: (MArray a Char m) => Arena a -> Bool -> Int -> Int -> Int -> m ()
 	drawLine arena horiz min max at = forM_ [min..max] (\o -> do
 		let pos = if horiz then (o,at) else (at,o)
-		--trace ("drawing line at " ++ show pos) return ()
 		current <- readArray arena pos
 		writeArray arena pos $ case current of
 		                            '|' -> if horiz then '+' else '!'
