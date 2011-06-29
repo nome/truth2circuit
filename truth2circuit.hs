@@ -522,6 +522,24 @@ handleInput input = do
 	putStrLn $ replicate 80 '-'
 	putStr $ showBindings bindings
 	putStrLn ""
+	putStrLn $ "============"
+	let (numAnd2, numAnd3, numOr2, numOr3, numNot) = foldl countGates (0,0,0,0,0) bindings where
+		countGates (a2,a3,o2,o3,n) (And [_,_])   = (a2+1,a3,o2,o3,n)
+		countGates (a2,a3,o2,o3,n) (And [_,_,_]) = (a2,a3+1,o2,o3,n)
+		countGates (a2,a3,o2,o3,n) (Or [_,_])    = (a2,a3,o2+1,o3,n)
+		countGates (a2,a3,o2,o3,n) (Or [_,_,_])  = (a2,a3,o2,o3+1,n)
+		countGates (a2,a3,o2,o3,n) (Not _)       = (a2,a3,o2,o3,n+1)
+		countGates (a2,a3,o2,o3,n) _             = (a2,a3,o2,o3,n)
+	putStrLn $ "type  number"
+	putStrLn $ "------------"
+	putStrLn $ "2xAND " ++ show numAnd2
+	putStrLn $ "3xAND " ++ show numAnd3
+	putStrLn $ "2xOR  " ++ show numOr2
+	putStrLn $ "3xOR  " ++ show numOr3
+	putStrLn $ "NOT   " ++ show numNot
+	putStrLn $ "------------"
+	putStrLn $ "total " ++ show (numAnd2 + numAnd3 + numOr2 + numOr3 + numNot)
+	putStrLn ""
 	putStrLn $ replicate 80 '='
 	putStrLn "The corresponding circuit looks like this:"
 	putStrLn $ replicate 80 '-'
