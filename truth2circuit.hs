@@ -1,4 +1,4 @@
-{-# LANGUAGE TupleSections, FlexibleContexts #-}
+{-# LANGUAGE TupleSections, FlexibleContexts, FlexibleInstances, MultiParamTypeClasses #-}
 {-
  - Copyright (C) 2011 by Knut Franke (knut dot franke at gmx dot de)
  -
@@ -291,8 +291,275 @@ createBindings bes = (((map unvar).snd.unbox) toplevel , reverse others) where
 
 
 {-
- - Now, towards a graphical representation of a BoolExpr as logic gates
+ - Abstraction of low-level drawing routines
+ -
+ - Improves code readability by clearly separating details of the graphical representation from more
+ - generic layout code; also it allows reusing the layout code for different output formats.
  -}
+class Monad m => DrawingArea a m where
+	drawLine   :: a -> (Int,Int) -> (Int,Int)       -> m ()
+	drawDot    :: a -> (Int,Int)                    -> m ()
+	drawGate   :: a -> (Int,Int) -> BoolExpr -> Int -> m ()
+	drawMarker :: a -> (Int,Int) -> Bool -> String  -> m ()
+
+{-
+ - A DrawingContext contains layout-relevant properties of a DrawingArea implementation.
+ - These need to be known in order to calculate the required size of the DrawingArea, i.e. before
+ - creating it.
+ -}
+data DrawingContext = DrawingContext {
+	gateWidth, gateHeight, xLineSep, yLineSep :: Int,
+	gateInputs :: BoolExpr -> [Int],
+	gateOutput :: BoolExpr -> Int
+	}
+
+-- coarse-grained placement of gates and "bypass" connections in a column
+data Placement = Placement {
+                   -- [(gate,output variable)]
+                   gatePlacement :: [(BoolExpr,Int)],
+                   -- list of pass-through connections
+                   -- a pass-through connection starts in the column *after* the one containing the
+                   -- output and ends in the column *before* the last one consuming it
+                   bypassPlacement :: [Int]
+                 }
+
+place :: [BoolExpr] -> [Placement]
+place bindings = map (uncurry Placement) (zip gates bypasses) where
+	gates :: [[(BoolExpr, Int)]]
+	gates = reverse $ map reverse $ gates' 0 bindings [[]] where
+		gates' _ [] acc = acc
+		gates' n (x:xs) (cur:done) = gates' (n+1) xs $ if isVar x
+			then (((sortInputs x,n):cur):done)
+			else (insert (snd $ unbox x) (sortInputs x,n) [] (reverse (cur:done)))
+
+		insert _ x done [] = [x]:done
+		insert sf x done (y:ys) = if null sf
+			then (reverse ys) ++ (x:y):done
+			else insert (filter (not.(`isIn` y)) sf) x (y:done) ys
+		isIn (Var i) = any ((==i).snd)
+		isIn _ = const True -- just in case we get fed unexpected input
+		isVar (Var _) = True
+		isVar _ = False
+
+		sortInputs x = let (boxer,content) = unbox x in boxer $ sort content
+
+	bypasses :: [[Int]]
+	bypasses = reverse $ foldl bp [] [0 .. length gates - 1] where
+		bp [] _ = [[]]
+		bp (a:as) c = (:a:as) $ filter ((>c).lastConsume) (a ++  (map snd (gates!!(c-1))))
+
+		lastConsume x = case findIndices (references x) gates of { [] -> -1; y -> maximum y }
+
+		references i c = any (elem (Var i) . snd . unbox . fst) c
+
+-- routing information for a layout column
+data Routing = Routing {
+	colLeft, colRight, connectLeft, connectRight :: Int,
+	rowBounds :: [(Int,Int)],
+	bypassPositions :: [Int],
+	connectors :: [[(Int,Int,[Int])]]
+	} deriving Show
+
+route :: DrawingContext -> [Placement] -> [Routing]
+route dc places = map routeColumn (zip3 places (zip colXs ((ymin,ymin):connectXs)) ([]:connectors)) where
+	routeColumn (c, ((l,r),(ll,rr)), conn) = Routing l r ll rr (rowYs c) (passYs c) conn
+
+	rowYs :: Placement -> [(Int,Int)]
+	rowYs col = take (length $ gatePlacement col) $ let gh = gateHeight dc in zip [1,1+gh ..] [gh, 2*gh ..]
+
+	passYs :: Placement -> [Int]
+	passYs col = take (length $ bypassPlacement col) [sry + (yLineSep dc), sry + 2*(yLineSep dc) ..] where
+		sry = snd (last (rowYs col))
+
+	ymin = 1
+	ymax = maximum $ map colHeight places where
+		colHeight c = if null (passYs c)
+			then snd (last (rowYs c))
+			else max (snd (last (rowYs c))) (last (passYs c))
+
+	-- for each column, computes a list of mappings out->[in] from the outputs of that column to
+	-- their respective inputs (where out and in are visual row numbers)
+	connections :: [[(Int,[Int])]]
+	connections = map connections' (zip places (tail places)) where
+		connections' (col,next) = filter (not.null.snd) $ connsFromGates ++ connsFromPass where
+			connsFromGates = do
+				((be,outvar), n) <- zip (gatePlacement col)   [0..]
+				return $ (n*(gateHeight dc)+(gateOutput dc be), connsToVar outvar)
+			connsFromPass = do
+				(ptvar, n)       <- zip (bypassPlacement col) [0..]
+				return $ ((length (gatePlacement col))*(gateHeight dc) + (n+1)*(yLineSep dc), connsToVar ptvar)
+			connsToVar var  = connsToGates ++ connsToPass where
+				connsToGates = do
+					((be,_), n)   <- zip (gatePlacement next)  [0..]
+					m <- findRefs var be
+					return $ n*(gateHeight dc) + ((gateInputs dc be)!!m)
+				connsToPass = do
+					(var',n) <- zip (bypassPlacement next) [0..]
+					guard $ var' == var
+					return $ (length (gatePlacement next))*(gateHeight dc) + (n+1)*(yLineSep dc)
+				findRefs var = (elemIndices (Var var)) . snd . unbox
+
+	interColWidths :: [Int]
+	interColWidths = map (\conns -> (xLineSep dc) * (length conns + length (collisions conns))) connections
+
+	colXs :: [(Int,Int)]
+	colXs = tail $ reverse $ foldl colXs' [(0,0)] (0:interColWidths) where
+		colXs' a@((_,pe):_) sb = (pe+sb+1, pe+sb+gateWidth dc):a
+
+	connectXs :: [(Int,Int)]
+	connectXs = map (\((_,a),(b,_)) -> (a,b)) (zip colXs (tail colXs))
+
+	-- when we have an output on the left and an input on the right on the same row,
+	-- we have to take care to keep all the lines separate
+	collisions :: [(Int, [Int])] -> [(Int, Int)]
+	collisions conns = do
+		((out,_), bp)      <- zip conns [0..]
+		((out',ins'), bp') <- zip conns [0..]
+		guard $ bp > bp'
+		guard $ out `elem` ins'
+		return (out', bp)
+
+	-- for every column, gives a list of output -> inputs connections of the form
+	-- [(yStart, xBranch, [yEnd])]
+	-- we need to return two tuples in case of re-routing to avoid collisions => list
+	connectors :: [[[(Int,Int,[Int])]]]
+	connectors = map connectors' connections where
+		connectors' conns = evalState (mapM connect conns) (collisionWidth + xLineSep dc, 0, []) where
+			-- width of the buch of vertical lines needed for collision avoidance
+			collisionWidth = (xLineSep dc) * (length (collisions conns))
+			totalConnectWidth = (xLineSep dc) * (length conns + length (collisions conns))
+			connect (from, tos) = case lookup from (collisions conns) of
+				Nothing -> do
+					-- simple connection (no collision avoidance needed)
+					(n,m,aas) <- get
+					put (n + xLineSep dc, m, aas)
+					return [(from, n, tos)]
+				Just bp -> do
+					(n,m,aas) <- get
+					let taboo = (aas++) $ join $ map (uncurry (:)) $ filter ((/= from).fst) conns
+					let pref = sum tos `div` length tos
+					let candsAbove = [pref, pref-(yLineSep dc) .. ymin]
+					let candsBelow = [pref+(yLineSep dc), pref+2*(yLineSep dc) .. ymax]
+					let cands = (interleave candsAbove candsBelow) \\ taboo
+					if null cands
+						then do
+							-- couldn't find free visual row for drawing the connection between branch
+							-- points return negative xBranch to indicate failure (we still have to return
+							-- from and tos, in order to allow drawing code to insert markers there)
+							put (n, m + xLineSep dc, aas)
+							return $ [(from, -1, tos)]
+						else do
+							-- found a free visual row
+							-- return two simple connections adding up to a connection avoiding the collision
+							let avoidAt = head cands
+							put (n, m + xLineSep dc, avoidAt:aas)
+							return $ [(from, m, [avoidAt]), (avoidAt, (totalConnectWidth `div` 2 + 1) - m, tos)]
+
+{-
+ - Main circuit layout / drawing function
+ -}
+drawCircuit :: DrawingArea a m => ((Int,Int) -> m a) -> [Placement] -> [Routing] -> m a
+drawCircuit newArea placements routings = do
+	let width = colRight (last routings)
+	let colHeight p = let b = bypassPositions p in if null b then snd (last $ rowBounds p) else last b
+	let height = maximum $ map colHeight routings
+
+	area <- newArea (width,height)
+	forM_ (zip placements routings) (drawColumn area)
+	return area
+
+	where
+
+	drawColumn :: DrawingArea a m => a -> (Placement, Routing) -> m ()
+	drawColumn area (plac,rout) = do
+		forM_ (zip (gatePlacement plac) (rowBounds rout)) (\((be,o),(ymin,_)) ->
+			drawGate area (colLeft rout,ymin) be o)
+		forM_ (bypassPositions rout) (\y -> drawLine area (colLeft rout - 1, y) (colRight rout + 1, y))
+		forM_ (connectors rout) (\c ->
+			forM_ (zip (rangeSplit (connectLeft rout, connectRight rout) (length c)) c) $
+				uncurry (drawConnector area))
+
+	rangeSplit :: (Int, Int) -> Int -> [(Int, Int)]
+	rangeSplit (from, to) 1 = [(from,to)]
+	rangeSplit (from, to) 2 = let w = (to-from) `div` 2 in [(from, from+w), (from+w-1, to)]
+
+	drawConnector :: DrawingArea a m => a -> (Int,Int) -> (Int,Int,[Int]) -> m ()
+	drawConnector area (xMin,xMax) (yStart, xBranchRel, yEnds) = if xBranchRel < 0
+		then do
+			drawMarker area (xMin, yStart) False (show yStart)
+			forM_ yEnds (\y -> drawMarker area (xMax, y) True (show yStart))
+		else do
+			let top = (minimum (yStart:yEnds))
+			let bottom = (maximum (yStart:yEnds))
+			let xBranch = xBranchRel + xMin
+			-- draw horizontal line from output to branch
+			drawLine area (xMin,yStart) (xBranch,yStart)
+			-- draw horizontal lines from branch to inputs
+			forM_ yEnds $ (\y -> drawLine area (xBranch,y) (xMax,y))
+			if top == bottom
+				then drawLine area (xBranch-1,top) (xBranch+1,top)
+				else do
+					-- draw vertical branching line
+					drawLine area (xBranch,top) (xBranch,bottom)
+					-- mark branch points with a dot
+					sequence_ [ drawDot area (xBranch, y) | y <- yStart:yEnds,
+						y /= top    || (top    == yStart && top    `elem` yEnds),
+						y /= bottom || (bottom == yStart && bottom `elem` yEnds) ]
+
+
+{-
+ - ASCII art drawing
+ -}
+
+-- any mutable array type will do
+instance MArray a Char m => DrawingArea (a (Int,Int) Char) m where
+	-- draw a single gate
+	drawGate area (xmin,ymin) be o = forM_ (zip [ymin..] (visual be o)) (\(y,l) ->
+		forM_ (zip [xmin..] l) (\(x,c) -> writeArray area (x,y) c))
+
+	-- draw a horizontal or vertical line, inserting crossings (+) as needed
+	-- and marking any other (unintentional) collisions with a !
+	drawLine area (x1,y1) (x2,y2) = if x1 == x2
+		then do
+			drawLine' False ((min y1 y2)+1) ((max y1 y2)-1) x1
+			when (y1 /= y2) $ writeArray area (x1, min y1 y2) '.' >> writeArray area (x1, max y1 y2) '\''
+		else if y1 == y2
+			then drawLine' True ((min x1 x2)+1) ((max x1 x2)-1) y1
+			else fail "ASCII-Art drawing supports only horizontal and vertical lines"
+		where
+		drawLine' horiz min max at = forM_ [min..max] (\o -> do
+			let pos = if horiz then (o,at) else (at,o)
+			current <- readArray area pos
+			writeArray area pos $ case current of
+			                           '|' -> if horiz then '+' else '!'
+			                           '-' -> if horiz then '!' else '+'
+			                           ' ' -> if horiz then '-' else '|'
+			                           _   -> '!' -- ! means there's a bug in layout/drawing code
+			)
+
+	drawDot area pos = writeArray area pos '*'
+
+	drawMarker area (x,y) left str = do
+		writeArray area (x,y) 'o'
+		forM_ (if left then zip (reverse str) [x-1,x-2..] else zip str [x+1..]) (\(c,xx) ->
+			writeArray area (xx,y) c)
+
+asciiArtContext :: DrawingContext
+asciiArtContext = DrawingContext aaGateWidth aaGateHeight aaXLineSep aaYLineSep aaGateInputs aaGateOutput where
+	aaGateWidth  = 11
+	aaGateHeight = 4
+	aaXLineSep = 2
+	aaYLineSep = 1
+
+	-- row numbers of in/outputs relative to the top of the respective visual
+	aaGateOutput _             = 3
+	aaGateInputs (Not _)       = [3]
+	aaGateInputs (And [_,_])   = [2,4]
+	aaGateInputs (And [_,_,_]) = [2,3,4]
+	aaGateInputs (Or  [_,_])   = [2,4]
+	aaGateInputs (Or  [_,_,_]) = [2,3,4]
+	aaGateInputs x             = trace ("ERROR: can't get visual inputs of " ++ show x) []
+
 
 visual :: BoolExpr -> Int ->  [String]
 visual (And [_,_]) o = ["    __  " ++ center 3 ' ' (show (Var o)),
@@ -337,177 +604,25 @@ visual (Const False) _ = ["           ",
                           "           ",
                           "False >----",
                           "           "]
--- drawing functions should work with any mutable array type
-type Arena a = a (Int, Int) Char
 
--- turn a list of variable definitions (i.e. each BoolExpr represents a variable binding) into an ASCII art drawing
+-- turn a list of variable definitions (i.e. each BoolExpr represents a variable binding) into an
+-- ASCII art drawing
 bindingsToCircuit :: [BoolExpr] -> String
-bindingsToCircuit input = showArray $ runSTUArray draw where
+bindingsToCircuit bnd = showArray $ runSTUArray (circuit placement routing) where
+	placement = place bnd
+	routing = route asciiArtContext placement
 
-	l :: [[(BoolExpr,Int)]]
-	l = layout input
-
-	-- returns a list of columns, each of which is a list of (gate,output var) pairs
-	layout :: [BoolExpr] -> [[(BoolExpr,Int)]]
-	layout = reverse . map reverse . layout' 0 [[]] where
-		layout' _ acc [] = acc
-		layout' n (cur:done) (x:xs) = if isVar x
-		                                  then layout' (n+1) (((sortInputs x,n):cur):done) xs
-		                                  else layout' (n+1) (insert (snd $ unbox x) (sortInputs x,n) [] (reverse (cur:done))) xs
-		insert _ x done [] = [x]:done
-		insert sf x done (y:ys) = if null sf
-		                              then (reverse ys) ++ (x:y):done
-		                              else insert (filter (not.(`isIn` y)) sf) x (y:done) ys
-		isIn (Var i) = any ((==i).snd)
-		isIn _ = const True -- just in case we get fed unexpected input
-		isVar (Var _) = True
-		isVar _ = False
-		sortInputs x = let (boxer,content) = unbox x in boxer $ sort content
+	-- do not omit the type declaration of circuit, lest the wrath of
+	-- InferredTypeIsLessPolymorphicThanExpected come upon us
+	circuit :: MArray a Char m => [Placement] -> [Routing] -> m (a (Int,Int) Char)
+	circuit = drawCircuit (\dim -> newArray ((1,1), dim) ' ')
 
 	-- the easy part: convert final 2D char array into string
 	showArray :: IArray a Char => a (Int,Int) Char -> String
 	showArray a = unlines $ map (\y -> map ((a!).(,y)) [xmin..xmax]) [ymin..ymax] where
 		((xmin,ymin), (xmax,ymax)) = bounds a
 
-	-- list of pass-through connections in each column
-	-- a pass-through connection starts in the column *after* the one containing the output
-	-- and ends in the column *before* the last one consuming it
-	passThrough :: [[Int]]
-	passThrough = reverse $ foldl pt [] [0 .. length l - 1] where
-		pt [] _ = [[]]
-		pt (a:as) c = (:a:as) $ filter ((>c).lastConsume) (a ++  (map snd (l!!(c-1))))
-		lastConsume x = case findIndices (references x) l of { [] -> -1; y -> maximum y }
-		references i c = any (elem (Var i) . snd . unbox . fst) c
 
-	-- for each column, contains a list of mappings out->[in] from the outputs of that column to their respective inputs
-	-- (where out and in are visual row numbers)
-	connections :: [[(Int,[Int])]]
-	connections = map (uncurry connsBetween) $ zip (zip l passThrough) (tail (zip l passThrough)) where
-		connsBetween (out,outpt) (ins,inpt) = connsFromGates ++ connsFromPass where
-			connsFromGates  = [ (n*visualHeight+visualOutput,       connsToVar outvar) | ((_,outvar),n) <- zip out   [0..] ]
-			connsFromPass   = [ ((length out)*visualHeight + n + 1, connsToVar ptvar)  | (ptvar,n)      <- zip outpt [0..] ]
-			connsToVar var  = connsToGates ++ connsToPass where
-				connsToGates = [ n*visualHeight + ((visualInputs be)!!m) | ((be,_),n) <- zip ins [0..], m <- findRefs var be]
-				connsToPass  = [ (length ins)*visualHeight + n + 1       | (var',n)   <- zip inpt [0..], var' == var        ]
-				findRefs var = (elemIndices (Var var)) . snd . unbox
-		-- row numbers of in/outputs relative to the top of the respective visual
-		visualOutput               = 3
-		visualInputs (Not _)       = [3]
-		visualInputs (And [_,_])   = [2,4]
-		visualInputs (And [_,_,_]) = [2,3,4]
-		visualInputs (Or  [_,_])   = [2,4]
-		visualInputs (Or  [_,_,_]) = [2,3,4]
-		visualInputs x             = trace ("ERROR: can't get visual inputs of " ++ show x) []
-
-	-- number of rows we need for the visual represenation of each column
-	colHeights :: [Int]
-	colHeights = [ visualHeight*(length gates) + (length passes) | (gates, passes) <- zip l passThrough ]
-
-	-- space needed after each column in order to draw all connections
-	interColWidths :: [Int]
-	interColWidths = map (\conns -> 2 * (length conns + 2 * length (collisions conns))) connections
-
-	-- when we have an output on the left and an input on the right on the same row,
-	-- we have to take care to keep all the lines separate
-	collisions conns = do
-		((out,_), bp)      <- zip conns [0..]
-		((out',ins'), bp') <- zip conns [0..]
-		guard $ bp > bp'
-		guard $ out `elem` ins'
-		return (out', bp)
-
-   -- dimensions of visual gate representations
-	visualWidth, visualHeight :: Int
-	visualWidth = 11
-	visualHeight = 4
-
-	draw :: (MArray a Char m) => m (Arena a)
-	draw = do
-		arena <- newArray ((1,1), (visualWidth*(length l) + sum interColWidths, maximum colHeights)) ' '
-		bounds <- getBounds arena
-		foldM_ (drawColumn arena) 1 (zip3 l passThrough (interColWidths++[0]))
-		foldM_ (drawConnectionsAt arena) (visualWidth+1) (zip connections interColWidths)
-		return arena
-
-	-- draw a given set of connections between two columns of gates
-	drawConnectionsAt :: (MArray a Char m) => Arena a -> Int -> ([(Int,[Int])], Int) -> m Int
-	drawConnectionsAt arena xmin (conns, space) = do
-		let xmax = xmin + space - 1
-		let collWidth = 2 * (length (collisions conns))
-		let connect (n,m,aas) (from,to) = case lookup from (collisions conns) of
-		                                      Nothing -> drawConnectionsFrom arena (xmin+collWidth+n) xmin xmax from to >> return (n+2,m,aas)
-		                                      Just bp -> do
-		                                          let taboo = (aas++) $ join $ map (uncurry (:)) $ filter ((/= from).fst) conns
-		                                          let preferred = sum to `div` length to
-		                                          let cands = interleave [preferred,preferred-1..1] [preferred+1,preferred+2..(maximum colHeights)]
-		                                          if null (cands \\ taboo)
-		                                             then do
-		                                                writeArray arena (xmin, from) 'o'
-		                                                forM_ (zip (show from) [xmin+1..]) (\(c,x) -> writeArray arena (x,from) c)
-		                                                forM_ to (\t -> writeArray arena (xmax, t) 'o' >>
-		                                                                forM_ (zip (reverse (show from)) [xmax-1,xmax-2..])
-		                                                                      (\(c,x) -> writeArray arena (x,t) c))
-		                                                return (n,m+2,aas)
-		                                             else do
-		                                                let avoidAt = head $ cands \\ taboo
-		                                                let center = ((xmin+xmax) `div` 2)
-		                                                drawConnectionsFrom arena (xmin+m) xmin       center  from    [avoidAt]
-		                                                drawConnectionsFrom arena (xmax-m) (center+1) xmax    avoidAt to
-		                                                return (n,m+2,avoidAt:aas)
-		foldM_ connect (collWidth, 0, []) conns
-		return (xmax+visualWidth+1)
-
-	-- draw connections starting at a given output
-	drawConnectionsFrom :: (MArray a Char m) => Arena a -> Int -> Int -> Int -> Int -> [Int] -> m ()
-	drawConnectionsFrom _ _ _ _ _ [] = return ()
-	drawConnectionsFrom arena branchAt startX endX startY endYs = do
-		let top = (minimum (startY:endYs))
-		let bottom = (maximum (startY:endYs))
-		-- draw horizontal line from output to branch
-		drawLine arena True startX (branchAt-1) startY
-		-- draw horizontal lines from branch to inputs
-		forM_ endYs $ drawLine arena True (branchAt+1) endX
-		if top == bottom
-			then drawLine arena True branchAt branchAt top
-			else do
-				-- draw vertical branching line
-				drawLine arena False top bottom branchAt
-				-- replace top corner with a nicer symbol, if appropriate
-				if top == startY && top `elem` endYs
-					then return ()
-					else writeArray arena (branchAt, top) $ if top == startY then '.' else ','
-				-- replace bottom corner with a nicer symbol, if appropriate
-				if bottom == startY && bottom `elem` endYs
-					then return ()
-					else writeArray arena (branchAt, bottom) $ '\'' --if bottom == startY then '’' else '`'
-				-- replace branch point with a * (i.e. a dot)
-				sequence_ [ writeArray arena (branchAt, y) '*' | y <- startY:endYs, y /= top || (top == startY && top `elem` endYs), y /= bottom || (bottom == startY && bottom `elem` endYs) ]
-
-	-- draw all gates in a given column
-	drawColumn :: (MArray a Char m) => Arena a -> Int -> ([(BoolExpr,Int)], [Int], Int) -> m Int
-	drawColumn arena xmin (col, passes, spaceAfter) = do
-		let xmax = xmin + visualWidth - 1
-		mapM_ (\(ymin,(be,o)) -> drawBoolExpr arena xmin ymin be o) $ zip [1,1+visualHeight ..] col
-		let bottom = visualHeight*(length col)
-		mapM_ (drawLine arena True xmin xmax) [bottom+1 .. bottom+(length passes)]
-		return (xmax + spaceAfter + 1)
-
-	-- draw a single gate
-	drawBoolExpr :: (MArray a Char m) => Arena a -> Int -> Int -> BoolExpr -> Int -> m ()
-	drawBoolExpr arena xmin ymin be o = forM_ (zip [ymin..] (visual be o)) (\(y,l) -> forM_ (zip [xmin..] l) (\(x,c) -> writeArray arena (x,y) c))
-
-	-- draw a horizontal or vertical line, inserting crossings (+) as needed
-	-- and marking any other (unintentional) collisions with a !
-	drawLine :: (MArray a Char m) => Arena a -> Bool -> Int -> Int -> Int -> m ()
-	drawLine arena horiz min max at = forM_ [min..max] (\o -> do
-		let pos = if horiz then (o,at) else (at,o)
-		current <- readArray arena pos
-		writeArray arena pos $ case current of
-		                            '|' -> if horiz then '+' else '!'
-		                            '-' -> if horiz then '!' else '+'
-		                            ' ' -> if horiz then '-' else '|'
-		                            _   -> '!' -- ! means there's a bug in layout/drawing code
-		)
 
 showBindings :: [BoolExpr] -> String
 showBindings = unlines . map (\(i,val) -> (show (Var i)) ++ " = " ++ show val) . zip [0..]
