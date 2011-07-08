@@ -39,6 +39,21 @@ interleave = interleave1 where
 	interleave2 xs (y:ys) = y:(interleave1 xs ys)
 
 {-
+ - Helper function: count number of list elements for which predicate is True
+ -}
+count :: Enum b => (a -> Bool) -> [a] -> b
+count pred = foldl (\c e -> if pred e then succ c else c) (toEnum 0)
+
+{-
+ - String padding
+ -}
+center, justifyLeft, justifyRight :: Int -> Char -> String -> String
+center n c s       = let p = (n - length s) `div` 2 in replicate p ' ' ++ s ++ replicate (n - length s - p) c
+justifyLeft n c s  = s ++ replicate (n - length s) c
+justifyRight n c s = replicate (n - length s) c ++ s
+
+
+{-
  - basic data type representing boolean expressions
  -}
 
@@ -174,12 +189,6 @@ applyExpr (And xs) ins = and $ map (\e -> applyExpr e ins) xs
 applyExpr (Or xs) ins  = or $ map (\e -> applyExpr e ins) xs
 
 {-
- - Helper function: count number of list elements for which predicate is True
- -}
-count :: Enum b => (a -> Bool) -> [a] -> b
-count pred = foldl (\c e -> if pred e then succ c else c) (toEnum 0)
-
-{-
  - Some stuff for working with truth tables
  -}
 type TruthTable = [([Bool], Bool)]
@@ -284,10 +293,6 @@ createBindings bes = (((map unvar).snd.unbox) toplevel , reverse others) where
 {-
  - Now, towards a graphical representation of a BoolExpr as logic gates
  -}
-
-center n c s       = let p = (n - length s) `div` 2 in replicate p ' ' ++ s ++ replicate (n - length s - p) c
-justifyLeft n c s  = s ++ replicate (n - length s) c
-justifyRight n c s = replicate (n - length s) c ++ s
 
 visual :: BoolExpr -> Int ->  [String]
 visual (And [_,_]) o = ["    __  " ++ center 3 ' ' (show (Var o)),
