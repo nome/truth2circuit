@@ -492,13 +492,13 @@ drawCircuit newArea placements routings = do
 			let top = (minimum (yStart:yEnds))
 			let bottom = (maximum (yStart:yEnds))
 			let xBranch = xBranchRel + xMin
-			-- draw horizontal line from output to branch
-			drawLine area (xMin,yStart) (xBranch,yStart)
-			-- draw horizontal lines from branch to inputs
-			forM_ yEnds $ (\y -> drawLine area (xBranch,y) (xMax,y))
 			if top == bottom
-				then drawLine area (xBranch-1,top) (xBranch+1,top)
+				then drawLine area (xMin, yStart) (xMax, head yEnds)
 				else do
+					-- draw horizontal line from output to branch
+					drawLine area (xMin,yStart) (xBranch,yStart)
+					-- draw horizontal lines from branch to inputs
+					forM_ yEnds $ (\y -> drawLine area (xBranch,y) (xMax,y))
 					-- draw vertical branching line
 					drawLine area (xBranch,top) (xBranch,bottom)
 					-- mark branch points with a dot
