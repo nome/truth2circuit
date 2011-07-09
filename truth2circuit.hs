@@ -65,10 +65,10 @@ instance Show BoolExpr where
 	show (Not e) = "/" ++ show e ++ "\\"
 	show (And []) = "!EMPTY AND!"
 	show (And [x]) = "!AND " ++ show x ++ "!"
-	show (And es) = concat (intersperse " " (map show (sort es)))
+	show (And es) = concat (intersperse " " (map show es))
 	show (Or [])  = "!EMPTY OR!"
 	show (Or [x]) = "!OR " ++ show x ++ "!"
-	show (Or es)  = "(" ++ concat (intersperse " + " (map show (sort es))) ++ ")"
+	show (Or es)  = "(" ++ concat (intersperse " + " (map show es)) ++ ")"
 
 
 -- helper function for reaching into composite expressions
@@ -91,7 +91,7 @@ applyBinaryRules rules box unbox input = applyBinaryRules' [] input where
 	-- splicing
 	applyBinaryRules' done (cur:rest) | Just x <- unbox cur = applyBinaryRules' [] (done ++ x ++ rest)
 	-- we finished applying rules to the list
-	applyBinaryRules' done [current] = box (current:done)
+	applyBinaryRules' done [current] = box $ sort $ current:done
 	-- apply the binary rules
 	applyBinaryRules' done (current:rest) = case applyRulesFor current [] rest of
 															Just replacement -> applyBinaryRules' [] (done ++ replacement)
