@@ -1,0 +1,14 @@
+name:              truth2circuit
+version:           0.1
+description:       turn truth tables into drawings of corresponding logic circuits
+license:           GPL
+license-file:      gpl.txt
+author:            Knut Franke
+maintainer:        knut dot franke at gmx dot de
+build-type:        Simple
+cabal-version:     >=1.2
+
+Executable truth2circuit
+  main-is:         truth2circuit.hs
+  build-depends:   base >= 3 && < 5, array, mtl
+  hs-source-dirs:  src
