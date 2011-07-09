@@ -77,14 +77,14 @@ applyBinaryRules rules box unbox input = applyBinaryRules' [] input where
 	applyBinaryRules' done [current] = box $ sort $ current:done
 	-- apply the binary rules
 	applyBinaryRules' done (current:rest) = case applyRulesFor current [] rest of
-															Just replacement -> applyBinaryRules' [] (done ++ replacement)
-															Nothing -> applyBinaryRules' (current:done) rest
+		Just replacement -> applyBinaryRules' [] (done ++ replacement)
+		Nothing -> applyBinaryRules' (current:done) rest
 	applyRulesFor _ _ [] = Nothing
 	applyRulesFor x done (r:rest) = case rules x r of
-													Just replacement -> Just $ done ++ replacement:rest
-													Nothing -> case rules r x of
-																		Just replacement -> Just $ done ++ replacement:rest
-																		Nothing -> applyRulesFor x (r:done) rest
+		Just replacement -> Just $ done ++ replacement:rest
+		Nothing -> case rules r x of
+			Just replacement -> Just $ done ++ replacement:rest
+			Nothing -> applyRulesFor x (r:done) rest
 
 {-
  - Check whether we're certain that truth of one expression implies truth of another
@@ -151,8 +151,8 @@ simplify (Or xs) = applyBinaryRules binarySimplifyOr Or unboxOr (map simplify xs
  -}
 sumOfProducts :: BoolExpr -> BoolExpr
 sumOfProducts (And xs) = case break isOr xs of
-									(_,[]) -> And xs
-									(s1,(Or m):s2) -> Or $ map (sumOfProducts.And.(s1++).(:s2)) m
+	(_,[]) -> And xs
+	(s1,(Or m):s2) -> Or $ map (sumOfProducts.And.(s1++).(:s2)) m
 	where
 		isOr (Or _) = True
 		isOr _      = False
