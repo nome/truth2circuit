@@ -69,7 +69,7 @@ parseMultiTruthTable :: String -> [TruthTable]
 parseMultiTruthTable str = map tableForOutput [0..(numOuts-1)] where
 	rows = filter isTableLine (lines str)
 	numIns, numOuts :: Int
-	numIns = truncate $ logBase 2 $ fromInteger.toInteger $ length rows
+	numIns = round $ logBase 2 $ fromInteger.toInteger $ length rows
 	numOuts = (length $ convertLine (head rows)) - numIns
 	convertLine :: String -> [Bool]
 	convertLine = map (=='1') . filter (`elem` "01")
