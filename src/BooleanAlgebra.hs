@@ -203,9 +203,8 @@ toTernary be = be
  -- introduce intermediate variables
  -- return list of variable indices corresponding to inputs and a list of variable bindings
  -- this helps reduce redundancies
-createBindings :: [BoolExpr] -> ([Int], [BoolExpr])
-createBindings bes = (((map unvar).snd.unbox) toplevel , reverse others) where
-	unvar (Var i) = i
+createBindings :: [BoolExpr] -> ([BoolExpr], [BoolExpr])
+createBindings bes = ((snd.unbox) toplevel , reverse others) where
 	toplevel:others = execState (ii (And bes)) initialVars
 	initialVars = reverse (map Var [0 .. maximum (map maxVar bes)])
 	ii :: BoolExpr -> State [BoolExpr] BoolExpr
