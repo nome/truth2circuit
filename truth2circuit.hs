@@ -1,4 +1,4 @@
-{-# LANGUAGE TupleSections, FlexibleContexts, FlexibleInstances, MultiParamTypeClasses #-}
+{-# LANGUAGE TupleSections, FlexibleContexts, FlexibleInstances, MultiParamTypeClasses, PatternGuards #-}
 {-
  - Copyright (C) 2011 by Knut Franke (knut dot franke at gmx dot de)
  -
@@ -84,21 +84,18 @@ unbox x        = (const x, [])
  -}
 type BinaryBoolRules = BoolExpr -> BoolExpr -> Maybe BoolExpr
 applyBinaryRules ::  BinaryBoolRules -> ([BoolExpr] -> BoolExpr) -> (BoolExpr -> Maybe [BoolExpr]) -> [BoolExpr] -> BoolExpr
-applyBinaryRules rules boxer unboxer input = applyBinaryRules' [] (head input) (tail input) where
-	applyBinaryRules' :: [BoolExpr] -> BoolExpr -> [BoolExpr] -> BoolExpr
+applyBinaryRules rules box unbox input = applyBinaryRules' [] input where
+	applyBinaryRules' :: [BoolExpr] -> [BoolExpr] -> BoolExpr
 	-- unboxing
-	applyBinaryRules' [] x [] = x
+	applyBinaryRules' [] [x] = x
 	-- splicing
-	applyBinaryRules' done current rest | isJust unboxed = applyBinaryRules' [] (head new) (tail new) where
-		unboxed = unboxer current
-		new = done ++ (fromJust unboxed) ++ rest
+	applyBinaryRules' done (cur:rest) | Just x <- unbox cur = applyBinaryRules' [] (done ++ x ++ rest)
 	-- we finished applying rules to the list
-	applyBinaryRules' done current [] = boxer (current:done)
+	applyBinaryRules' done [current] = box (current:done)
 	-- apply the binary rules
-	applyBinaryRules' done current rest = case applyRulesFor current [] rest of
-															Just replacement -> let new = done ++ replacement in
-																						   applyBinaryRules' [] (head new) (tail new)
-															Nothing -> applyBinaryRules' (current:done) (head rest) (tail rest)
+	applyBinaryRules' done (current:rest) = case applyRulesFor current [] rest of
+															Just replacement -> applyBinaryRules' [] (done ++ replacement)
+															Nothing -> applyBinaryRules' (current:done) rest
 	applyRulesFor _ _ [] = Nothing
 	applyRulesFor x done (r:rest) = case rules x r of
 													Just replacement -> Just $ done ++ replacement:rest
