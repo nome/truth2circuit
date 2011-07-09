@@ -453,7 +453,7 @@ route dc places = map routeColumn (zip3 places (zip colXs ((ymin,ymin):connectXs
 							-- return two simple connections adding up to a connection avoiding the collision
 							let avoidAt = head cands
 							put (n, m + xLineSep dc, avoidAt:aas)
-							return $ [(from, m, [avoidAt]), (avoidAt, (totalConnectWidth `div` 2 + 1) - m, tos)]
+							return $ [(from, m, [avoidAt]), (avoidAt, (totalConnectWidth `div` 2) - m, tos)]
 
 {-
  - Main circuit layout / drawing function
@@ -474,14 +474,14 @@ drawCircuit newArea placements routings = do
 	drawColumn area (plac,rout) = do
 		forM_ (zip (gatePlacement plac) (rowBounds rout)) (\((be,o),(ymin,_)) ->
 			drawGate area (colLeft rout,ymin) be o)
-		forM_ (bypassPositions rout) (\y -> drawLine area (colLeft rout - 1, y) (colRight rout + 1, y))
+		forM_ (bypassPositions rout) (\y -> drawLine area (colLeft rout, y) (colRight rout, y))
 		forM_ (connectors rout) (\c ->
 			forM_ (zip (rangeSplit (connectLeft rout, connectRight rout) (length c)) c) $
 				uncurry (drawConnector area))
 
 	rangeSplit :: (Int, Int) -> Int -> [(Int, Int)]
 	rangeSplit (from, to) 1 = [(from,to)]
-	rangeSplit (from, to) 2 = let w = (to-from) `div` 2 in [(from, from+w), (from+w-1, to)]
+	rangeSplit (from, to) 2 = let w = (to-from) `div` 2 in [(from, from+w), (from+w, to)]
 
 	drawConnector :: DrawingArea a m => a -> (Int,Int) -> (Int,Int,[Int]) -> m ()
 	drawConnector area (xMin,xMax) (yStart, xBranchRel, yEnds) = if xBranchRel < 0
@@ -521,21 +521,24 @@ instance MArray a Char m => DrawingArea (a (Int,Int) Char) m where
 	-- and marking any other (unintentional) collisions with a !
 	drawLine area (x1,y1) (x2,y2) = if x1 == x2
 		then do
-			drawLine' False ((min y1 y2)+1) ((max y1 y2)-1) x1
-			when (y1 /= y2) $ writeArray area (x1, min y1 y2) '.' >> writeArray area (x1, max y1 y2) '\''
+			forM_ [((min y1 y2)+1) .. ((max y1 y2)-1)] (\y -> drawSegment (x1,y) False False '|')
+			when (y1 /= y2) $ drawSegment (x1, (min y1 y2)) False True '.'
+			when (y1 /= y2) $ drawSegment (x1, (max y1 y2)) False True '\''
 		else if y1 == y2
-			then drawLine' True ((min x1 x2)+1) ((max x1 x2)-1) y1
+			then do
+				forM_ [(min x1 x2) + 1 .. (max x1 x2) - 1] (\x -> drawSegment (x,y1) True False '-')
+				drawSegment (min x1 x2, y1) True True '-'
+				drawSegment (max x1 x2, y1) True True '-'
 			else fail "ASCII-Art drawing supports only horizontal and vertical lines"
 		where
-		drawLine' horiz min max at = forM_ [min..max] (\o -> do
-			let pos = if horiz then (o,at) else (at,o)
+		drawSegment pos horiz endp char = do
 			current <- readArray area pos
 			writeArray area pos $ case current of
-			                           '|' -> if horiz then '+' else '!'
-			                           '-' -> if horiz then '!' else '+'
-			                           ' ' -> if horiz then '-' else '|'
+			                           '|' -> if horiz then '+' else if endp then char else '!'
+			                           '-' -> if endp then char else if horiz then '!' else '+'
+			                           ' ' -> char
+			                           '+' -> '+'
 			                           _   -> '!' -- ! means there's a bug in layout/drawing code
-			)
 
 	drawDot area pos = writeArray area pos '*'
 
@@ -546,7 +549,7 @@ instance MArray a Char m => DrawingArea (a (Int,Int) Char) m where
 
 asciiArtContext :: DrawingContext
 asciiArtContext = DrawingContext aaGateWidth aaGateHeight aaXLineSep aaYLineSep aaGateInputs aaGateOutput where
-	aaGateWidth  = 11
+	aaGateWidth  = 12
 	aaGateHeight = 4
 	aaXLineSep = 2
 	aaYLineSep = 1
@@ -563,32 +566,32 @@ asciiArtContext = DrawingContext aaGateWidth aaGateHeight aaXLineSep aaYLineSep 
 
 visual :: BoolExpr -> Int ->  [String]
 visual (And [_,_]) o = ["    __  " ++ center 3 ' ' (show (Var o)),
-                        "---|  -  | ",
+                        " --|  -  | ",
                         "   |   )-^-",
-                        "---|__-    "]
+                        " --|__-    "]
 visual (And [_,_,_]) o = ["    __  " ++ center 3 ' ' (show (Var o)),
-                          "---|  -  | ",
-                          "---|   )-^-",
-                          "---|__-    "]
+                          " --|  -  | ",
+                          " --|   )-^-",
+                          " --|__-    "]
 visual (And x) o =     ["        " ++ center 3 ' ' (show (Var o)),
                         " ERROR   | ",
                         " AND    -^-",
                         " " ++ justifyLeft 10 ' ' (show (length x))]
 visual (Or [_,_])  o = ["   ___  " ++ center 3 ' ' (show (Var o)),
-                        "--\\   -. | ",
+                        " -\\   -. | ",
                         "   )    >^-",
-                        "--/___-'   "]
+                        " -/___-'   "]
 visual (Or [_,_,_])  o = ["   ___  " ++ center 3 ' ' (show (Var o)),
-                          "--\\   -. | ",
-                          "---)    >^-",
-                          "--/___-'   "]
+                          " -\\   -. | ",
+                          " --)    >^-",
+                          " -/___-'   "]
 visual (Or x) o =      ["        " ++ center 3 ' ' (show (Var o)),
                         " ERROR   | ",
                         " OR     -^-",
                         " " ++ justifyLeft 10 ' ' (show (length x))]
 visual (Not _) o = ["        " ++ center 3 ' ' (show (Var o)),
                     "         | ",
-                    "----|>o--^-",
+                    " ---|>o--^-",
                     "           "]
 
 visual (Var i) _ = ["           ",
