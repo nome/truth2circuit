@@ -105,14 +105,14 @@ route dc places = map routeColumn (zip3 places (zip colXs ((ymin,ymin):connectXs
 	rowYs col = take (length $ gatePlacement col) $ let gh = gateHeight dc in zip [1,1+gh ..] [gh, 2*gh ..]
 
 	passYs :: Placement -> [Int]
-	passYs col = take (length $ bypassPlacement col) [sry + (yLineSep dc), sry + 2*(yLineSep dc) ..] where
+	passYs col = take (length $ bypassPlacement col) [sry+1, sry+1+(yLineSep dc) ..] where
 		sry = snd (last (rowYs col))
 
 	ymin = 1
 	ymax = maximum $ map colHeight places where
 		colHeight c = if null (passYs c)
 			then snd (last (rowYs c))
-			else max (snd (last (rowYs c))) (last (passYs c))
+			else (last (passYs c)) + (yLineSep dc)
 
 	-- for each column, computes a list of mappings out->[in] from the outputs of that column to
 	-- their respective inputs (where out and in are visual row numbers)
@@ -174,7 +174,7 @@ route dc places = map routeColumn (zip3 places (zip colXs ((ymin,ymin):connectXs
 				Just bp -> do
 					(n,m,aas) <- get
 					let taboo = (aas++) $ join $ map (uncurry (:)) $ filter ((/= from).fst) conns
-					let pref = sum tos `div` length tos
+					let pref = round (fromIntegral (sum tos) / fromIntegral (length tos) / (fromIntegral $ yLineSep dc)) * (yLineSep dc) + 1
 					let candsAbove = [pref, pref-(yLineSep dc) .. ymin]
 					let candsBelow = [pref+(yLineSep dc), pref+2*(yLineSep dc) .. ymax]
 					let cands = (interleave candsAbove candsBelow) \\ taboo
