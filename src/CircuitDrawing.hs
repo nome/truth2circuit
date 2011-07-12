@@ -91,6 +91,7 @@ place bindings = map (uncurry Placement) (zip gates bypasses) where
 -- routing information for a layout column
 data Routing = Routing {
 	colLeft, colRight, connectLeft, connectRight :: Int,
+	colTop, colBottom :: Int,
 	rowBounds :: [(Int,Int)],
 	bypassPositions :: [Int],
 	connectors :: [[(Int,Int,[Int])]]
@@ -98,7 +99,7 @@ data Routing = Routing {
 
 route :: DrawingContext -> [Placement] -> [Routing]
 route dc places = map routeColumn (zip3 places (zip colXs ((ymin,ymin):connectXs)) ([]:connectors)) where
-	routeColumn (c, ((l,r),(ll,rr)), conn) = Routing l r ll rr (rowYs c) (passYs c) conn
+	routeColumn (c, ((l,r),(ll,rr)), conn) = Routing l r ll rr ymin ymax (rowYs c) (passYs c) conn
 
 	rowYs :: Placement -> [(Int,Int)]
 	rowYs col = take (length $ gatePlacement col) $ let gh = gateHeight dc in zip [1,1+gh ..] [gh, 2*gh ..]
@@ -123,7 +124,7 @@ route dc places = map routeColumn (zip3 places (zip colXs ((ymin,ymin):connectXs
 				return $ (n*(gateHeight dc)+(gateOutput dc be), connsToVar outvar)
 			connsFromPass = do
 				(ptvar, n)       <- zip (bypassPlacement col) [0..]
-				return $ ((length (gatePlacement col))*(gateHeight dc) + (n+1)*(yLineSep dc), connsToVar ptvar)
+				return $ ((passYs col)!!n, connsToVar ptvar)
 			connsToVar var  = connsToGates ++ connsToPass where
 				connsToGates = do
 					((be,_), n)   <- zip (gatePlacement next)  [0..]
@@ -132,7 +133,7 @@ route dc places = map routeColumn (zip3 places (zip colXs ((ymin,ymin):connectXs
 				connsToPass = do
 					(var',n) <- zip (bypassPlacement next) [0..]
 					guard $ var' == var
-					return $ (length (gatePlacement next))*(gateHeight dc) + (n+1)*(yLineSep dc)
+					return $ (passYs next)!!n
 				findRefs var = (elemIndices (Var var)) . snd . unbox
 
 	interColWidths :: [Int]
@@ -194,8 +195,7 @@ route dc places = map routeColumn (zip3 places (zip colXs ((ymin,ymin):connectXs
 circuitSize :: [Routing] -> (Int,Int)
 circuitSize routings = (width, height) where
 	width = colRight (last routings)
-	colHeight p = let b = bypassPositions p in if null b then snd (last $ rowBounds p) else last b
-	height = maximum $ map colHeight routings
+	height = maximum $ map colBottom routings
 
 {-
  - Main circuit layout / drawing function
