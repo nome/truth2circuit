@@ -84,14 +84,14 @@ asciiArtContext = DrawingContext aaGateWidth aaGateHeight aaXLineSep aaYLineSep 
 
 
 visual :: BoolExpr -> Int ->  [String]
-visual (And [_,_]) o = ["    __  " ++ center 3 ' ' (show (Var o)),
-                        " --|  -  | ",
-                        "   |   )-^-",
-                        " --|__-    "]
-visual (And [_,_,_]) o = ["    __  " ++ center 3 ' ' (show (Var o)),
-                          " --|  -  | ",
-                          " --|   )-^-",
-                          " --|__-    "]
+visual (And [_,_]) o = ["   ____ " ++ center 3 ' ' (show (Var o)),
+                        " -|    - | ",
+                        "  |     )^-",
+                        " -|____-   "]
+visual (And [_,_,_]) o = ["   ____ " ++ center 3 ' ' (show (Var o)),
+                          " -|    - | ",
+                          " -|     )^-",
+                          " -|____-   "]
 visual (And x) o =     ["        " ++ center 3 ' ' (show (Var o)),
                         " ERROR   | ",
                         " AND    -^-",
