@@ -1,4 +1,3 @@
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-
  - Copyright (C) 2011 by Knut Franke (knut dot franke at gmx dot de)
  -
@@ -45,24 +44,24 @@ cairoContext = CD.DrawingContext cGateWidth cGateHeight cXLineSep cYLineSep cGat
 	cGateInputs (Or  [_,_,_]) = [11,21,31]
 	cGateInputs x             = trace ("ERROR: can't get visual inputs of " ++ show x) []
 
-instance CD.DrawingArea () Render where
-	drawLine () (x1,y1) (x2,y2) = do
+instance CD.CircuitDraw Render where
+	drawLine (x1,y1) (x2,y2) = do
 		moveTo (i2d x1) (i2d y1)
 		lineTo (i2d x2) (i2d y2)
 		stroke
 
-	drawDot () (x,y) = do
+	drawDot (x,y) = do
 		arc (i2d x) (i2d y) 4 0 (2*pi)
 		fill
 
-	drawMarker () (x,y) left str = do
+	drawMarker (x,y) left str = do
 		arc (i2d x) (i2d y) 4 0 (2*pi)
 		stroke
 		te <- textExtents str
 		moveTo (i2d x-(if left then 2 + textExtentsWidth te else -2)) (i2d y+(textExtentsHeight te)/2)
 		showText str
 
-	drawGate () (x,y) v@(Var _) _ = do
+	drawGate (x,y) v@(Var _) _ = do
 		save ; translate (i2d x) (i2d y)
 		moveTo 60 20 ; lineTo 30 20
 		moveTo 24 14 ; lineTo 30 20 ; lineTo 24 26
@@ -72,7 +71,7 @@ instance CD.DrawingArea () Render where
 		showText (show v)
 		restore
 
-	drawGate () (x,y) (Const b) _ = do
+	drawGate (x,y) (Const b) _ = do
 		save ; translate (i2d x) (i2d y)
 		moveTo 60 20 ; lineTo 30 20
 		moveTo 24 14 ; lineTo 30 20 ; lineTo 24 26
@@ -82,7 +81,7 @@ instance CD.DrawingArea () Render where
 		showText (show b)
 		restore
 
-	drawGate () (x,y) (And [_,_]) o = do
+	drawGate (x,y) (And [_,_]) o = do
 		save ; translate (i2d x) (i2d y)
 		moveTo 30 0
 		arc 30 20 20 (-pi/2) (pi/2)
@@ -95,13 +94,13 @@ instance CD.DrawingArea () Render where
 		showText $ show (Var o)
 		restore
 	
-	drawGate () (x,y) (And (ins@[_,_,_])) o = do
-		CD.drawGate () (x,y) (And (take 2 ins)) o
+	drawGate (x,y) (And (ins@[_,_,_])) o = do
+		CD.drawGate (x,y) (And (take 2 ins)) o
 		moveTo (i2d x) (i2d y+20)
 		relLineTo 10 0
 		stroke
 	
-	drawGate () (x,y) (Or [_,_]) o = do
+	drawGate (x,y) (Or [_,_]) o = do
 		save ; translate (i2d x) (i2d y)
 		moveTo 10 0
 		curveTo 30 0 40 0 50 20
@@ -115,13 +114,13 @@ instance CD.DrawingArea () Render where
 		showText $ show (Var o)
 		restore
 
-	drawGate () (x,y) (Or (ins@[_,_,_])) o = do
-		CD.drawGate () (x,y) (Or (take 2 ins)) o
+	drawGate (x,y) (Or (ins@[_,_,_])) o = do
+		CD.drawGate (x,y) (Or (take 2 ins)) o
 		moveTo (i2d x) (i2d y+20)
 		relLineTo 10 0
 		stroke
 	
-	drawGate () (x,y) (Not _) o = do
+	drawGate (x,y) (Not _) o = do
 		save ; translate (i2d x) (i2d y)
 		moveTo 30 20 ; lineTo 14 12 ; lineTo 14 28
 		closePath ; stroke
@@ -160,7 +159,7 @@ displayCircuit bnd = do
 		selectFontFace "Droid" FontSlantNormal FontWeightNormal
 		setFontSize 14
 
-	let renderCircuit = renderSettings >> CD.drawCircuit () placement routing
+	let renderCircuit = renderSettings >> CD.drawCircuit placement routing
 
 	drawing <- widgetGetDrawWindow canvas
 	onExpose canvas $ const $ renderWithDrawable drawing renderCircuit >> return True

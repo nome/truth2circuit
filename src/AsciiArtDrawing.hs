@@ -1,4 +1,4 @@
-{-# LANGUAGE TupleSections, FlexibleContexts, FlexibleInstances, MultiParamTypeClasses #-}
+{-# LANGUAGE TupleSections, FlexibleContexts, FlexibleInstances #-}
 {-
  - Copyright (C) 2011 by Knut Franke (knut dot franke at gmx dot de)
  -
@@ -28,17 +28,20 @@ import Util
 import Data.Array.ST
 import Data.Array.Unboxed
 import Control.Monad
+import Control.Monad.Reader
 import Debug.Trace
 
 -- any mutable array type will do
-instance MArray a Char m => DrawingArea (a (Int,Int) Char) m where
+instance MArray a Char m => CircuitDraw (ReaderT (a (Int,Int) Char) m) where
 	-- draw a single gate
-	drawGate area (xmin,ymin) be o = forM_ (zip [ymin..] (visual be o)) (\(y,l) ->
-		forM_ (zip [xmin..] l) (\(x,c) -> writeArray area (x,y) c))
+	drawGate (xmin,ymin) be o = do
+		area <- ask
+		lift $ forM_ (zip [ymin..] (visual be o)) (\(y,l) ->
+			forM_ (zip [xmin..] l) (\(x,c) -> writeArray area (x,y) c))
 
 	-- draw a horizontal or vertical line, inserting crossings (+) as needed
 	-- and marking any other (unintentional) collisions with a !
-	drawLine area (x1,y1) (x2,y2) = if x1 == x2
+	drawLine (x1,y1) (x2,y2) = if x1 == x2
 		then do
 			forM_ [((min y1 y2)+1) .. ((max y1 y2)-1)] (\y -> drawSegment (x1,y) False False '|')
 			when (y1 /= y2) $ drawSegment (x1, (min y1 y2)) False True '.'
@@ -51,19 +54,23 @@ instance MArray a Char m => DrawingArea (a (Int,Int) Char) m where
 			else fail "ASCII-Art drawing supports only horizontal and vertical lines"
 		where
 		drawSegment pos horiz endp char = do
-			current <- readArray area pos
-			writeArray area pos $ case current of
+			area <- ask
+			current <- lift $ readArray area pos
+			lift $ writeArray area pos $ case current of
 			                           '|' -> if horiz then '+' else if endp then char else '!'
 			                           '-' -> if endp then char else if horiz then '!' else '+'
 			                           ' ' -> char
 			                           '+' -> '+'
 			                           _   -> '!' -- ! means there's a bug in layout/drawing code
 
-	drawDot area pos = writeArray area pos '*'
+	drawDot pos = do
+		area <- ask
+		lift $ writeArray area pos '*'
 
-	drawMarker area (x,y) left str = do
-		writeArray area (x,y) 'o'
-		forM_ (if left then zip (reverse str) [x-1,x-2..] else zip str [x+1..]) (\(c,xx) ->
+	drawMarker (x,y) left str = do
+		area <- ask
+		lift $ writeArray area (x,y) 'o'
+		lift $ forM_ (if left then zip (reverse str) [x-1,x-2..] else zip str [x+1..]) (\(c,xx) ->
 			writeArray area (xx,y) c)
 
 asciiArtContext :: DrawingContext
@@ -137,7 +144,10 @@ drawCircuit bnd = showArray $ runSTUArray (circuit placement routing) where
 	-- do not omit the type declaration of circuit, lest the wrath of
 	-- InferredTypeIsLessPolymorphicThanExpected come upon us
 	circuit :: MArray a Char m => [Placement] -> [Routing] -> m (a (Int,Int) Char)
-	circuit p r = (newArray ((1,1), circuitSize routing) ' ') >>= (\a -> CircuitDrawing.drawCircuit a p r)
+	circuit p r = do
+		area <- newArray ((1,1), circuitSize routing) ' '
+		runReaderT (CircuitDrawing.drawCircuit p r) area
+		return area
 
 	-- the easy part: convert final 2D char array into string
 	showArray :: IArray a Char => a (Int,Int) Char -> String

@@ -17,8 +17,6 @@
  - Boston, MA  02110-1301  USA
  -}
 
-{-# LANGUAGE MultiParamTypeClasses #-}
-
 module CircuitDrawing where
 
 import BooleanAlgebra
@@ -32,15 +30,15 @@ import Data.List
  - Improves code readability by clearly separating details of the graphical representation from more
  - generic layout code; also it allows reusing the layout code for different output formats.
  -}
-class Monad m => DrawingArea a m where
-	drawLine   :: a -> (Int,Int) -> (Int,Int)       -> m ()
-	drawDot    :: a -> (Int,Int)                    -> m ()
-	drawGate   :: a -> (Int,Int) -> BoolExpr -> Int -> m ()
-	drawMarker :: a -> (Int,Int) -> Bool -> String  -> m ()
+class Monad m => CircuitDraw m where
+	drawLine   :: (Int,Int) -> (Int,Int)       -> m ()
+	drawDot    :: (Int,Int)                    -> m ()
+	drawGate   :: (Int,Int) -> BoolExpr -> Int -> m ()
+	drawMarker :: (Int,Int) -> Bool -> String  -> m ()
 
 {-
- - A DrawingContext contains layout-relevant properties of a DrawingArea implementation.
- - These need to be known in order to calculate the required size of the DrawingArea, i.e. before
+ - A DrawingContext contains layout-relevant properties of a CircuitDraw implementation.
+ - These need to be known in order to calculate the required size of the CircuitDraw, i.e. before
  - creating it.
  -}
 data DrawingContext = DrawingContext {
@@ -200,42 +198,42 @@ circuitSize routings = (width, height) where
 {-
  - Main circuit layout / drawing function
  -}
-drawCircuit :: DrawingArea a m => a -> [Placement] -> [Routing] -> m a
-drawCircuit area ps rs = forM_ (zip ps rs) (drawColumn area) >> return area where
+drawCircuit :: CircuitDraw m => [Placement] -> [Routing] -> m ()
+drawCircuit ps rs = forM_ (zip ps rs) drawColumn where
 
-	drawColumn :: DrawingArea a m => a -> (Placement, Routing) -> m ()
-	drawColumn area (plac,rout) = do
+	drawColumn :: CircuitDraw m => (Placement, Routing) -> m ()
+	drawColumn (plac,rout) = do
 		forM_ (zip (gatePlacement plac) (rowBounds rout)) (\((be,o),(ymin,_)) ->
-			drawGate area (colLeft rout,ymin) be o)
-		forM_ (bypassPositions rout) (\y -> drawLine area (colLeft rout, y) (colRight rout, y))
+			drawGate (colLeft rout,ymin) be o)
+		forM_ (bypassPositions rout) (\y -> drawLine (colLeft rout, y) (colRight rout, y))
 		forM_ (connectors rout) (\c ->
 			forM_ (zip (rangeSplit (connectLeft rout, connectRight rout) (length c)) c) $
-				uncurry (drawConnector area))
+				uncurry drawConnector )
 
 	rangeSplit :: (Int, Int) -> Int -> [(Int, Int)]
 	rangeSplit (from, to) 1 = [(from,to)]
 	rangeSplit (from, to) 2 = let w = (to-from) `div` 2 in [(from, from+w), (from+w, to)]
 
-	drawConnector :: DrawingArea a m => a -> (Int,Int) -> (Int,Int,[Int]) -> m ()
-	drawConnector area (xMin,xMax) (yStart, xBranchRel, yEnds) = if xBranchRel < 0
+	drawConnector :: CircuitDraw m => (Int,Int) -> (Int,Int,[Int]) -> m ()
+	drawConnector (xMin,xMax) (yStart, xBranchRel, yEnds) = if xBranchRel < 0
 		then do
-			drawMarker area (xMin, yStart) False (show yStart)
-			forM_ yEnds (\y -> drawMarker area (xMax, y) True (show yStart))
+			drawMarker (xMin, yStart) False (show yStart)
+			forM_ yEnds (\y -> drawMarker (xMax, y) True (show yStart))
 		else do
 			let top = (minimum (yStart:yEnds))
 			let bottom = (maximum (yStart:yEnds))
 			let xBranch = xBranchRel + xMin
 			if top == bottom
-				then drawLine area (xMin, yStart) (xMax, head yEnds)
+				then drawLine (xMin, yStart) (xMax, head yEnds)
 				else do
 					-- draw horizontal line from output to branch
-					drawLine area (xMin,yStart) (xBranch,yStart)
+					drawLine (xMin,yStart) (xBranch,yStart)
 					-- draw horizontal lines from branch to inputs
-					forM_ yEnds $ (\y -> drawLine area (xBranch,y) (xMax,y))
+					forM_ yEnds $ (\y -> drawLine (xBranch,y) (xMax,y))
 					-- draw vertical branching line
-					drawLine area (xBranch,top) (xBranch,bottom)
+					drawLine (xBranch,top) (xBranch,bottom)
 					-- mark branch points with a dot
-					sequence_ [ drawDot area (xBranch, y) | y <- yStart:yEnds,
+					sequence_ [ drawDot (xBranch, y) | y <- yStart:yEnds,
 						y /= top    || (top    == yStart && top    `elem` yEnds),
 						y /= bottom || (bottom == yStart && bottom `elem` yEnds) ]
 
