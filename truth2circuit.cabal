@@ -12,3 +12,8 @@ Executable truth2circuit
   main-is:         truth2circuit.hs
   build-depends:   base >= 3 && < 5, array, mtl
   hs-source-dirs:  src
+
+Executable gtruth2circuit
+  main-is:         gtruth2circuit.hs
+  build-depends:   base >= 3 && < 5, gtk, cairo
+  hs-source-dirs:  src

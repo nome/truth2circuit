@@ -137,7 +137,7 @@ drawCircuit bnd = showArray $ runSTUArray (circuit placement routing) where
 	-- do not omit the type declaration of circuit, lest the wrath of
 	-- InferredTypeIsLessPolymorphicThanExpected come upon us
 	circuit :: MArray a Char m => [Placement] -> [Routing] -> m (a (Int,Int) Char)
-	circuit = CircuitDrawing.drawCircuit (\dim -> newArray ((1,1), dim) ' ')
+	circuit p r = (newArray ((1,1), circuitSize routing) ' ') >>= (\a -> CircuitDrawing.drawCircuit a p r)
 
 	-- the easy part: convert final 2D char array into string
 	showArray :: IArray a Char => a (Int,Int) Char -> String

@@ -191,20 +191,17 @@ route dc places = map routeColumn (zip3 places (zip colXs ((ymin,ymin):connectXs
 							put (n, m + xLineSep dc, avoidAt:aas)
 							return $ [(from, m, [avoidAt]), (avoidAt, (totalConnectWidth `div` 2) - m, tos)]
 
+circuitSize :: [Routing] -> (Int,Int)
+circuitSize routings = (width, height) where
+	width = colRight (last routings)
+	colHeight p = let b = bypassPositions p in if null b then snd (last $ rowBounds p) else last b
+	height = maximum $ map colHeight routings
+
 {-
  - Main circuit layout / drawing function
  -}
-drawCircuit :: DrawingArea a m => ((Int,Int) -> m a) -> [Placement] -> [Routing] -> m a
-drawCircuit newArea placements routings = do
-	let width = colRight (last routings)
-	let colHeight p = let b = bypassPositions p in if null b then snd (last $ rowBounds p) else last b
-	let height = maximum $ map colHeight routings
-
-	area <- newArea (width,height)
-	forM_ (zip placements routings) (drawColumn area)
-	return area
-
-	where
+drawCircuit :: DrawingArea a m => a -> [Placement] -> [Routing] -> m a
+drawCircuit area ps rs = forM_ (zip ps rs) (drawColumn area) >> return area where
 
 	drawColumn :: DrawingArea a m => a -> (Placement, Routing) -> m ()
 	drawColumn area (plac,rout) = do
