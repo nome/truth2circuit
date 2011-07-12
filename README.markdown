@@ -49,18 +49,18 @@ Output:
 	================================================================================
 	The corresponding circuit looks like this:
 	--------------------------------------------------------------------------------
-	                      __   d           ___   g  
-	             .-------|  -  |   .------\   -. |  
-	    a >------*       |   )-^---' .-----)    >^- 
-	             | .-----|__-        | .--/___-'    
-	             | |      __   e     | |            
-	             '-+-----|  -  |     | |            
-	    b >--------*     |   )-^-----' |            
-	               | .---|__-          |            
-	               | |    __   f       |            
-	               '-+---|  -  |       |            
-	    c >----------*   |   )-^-------'            
-	                 '---|__-                       
+	                     ____  d           ___   g  
+	             .------|    - |   .------\   -. |  
+	    a >------*      |     )^---' .-----)    >^- 
+	             | .----|____-       | .--/___-'    
+	             | |     ____  e     | |            
+	             '-+----|    - |     | |            
+	    b >--------*    |     )^-----' |            
+	               | .--|____-         |            
+	               | |   ____  f       |            
+	               '-+--|    - |       |            
+	    c >----------*  |     )^-------'            
+	                 '--|____-                      
 
 Installing
 ==========
@@ -71,14 +71,19 @@ compilers/interpreters, since it uses some non-standard language features.
 
 Optionally, install [Cabal](http://haskell.org/cabal) for building and installing.
 
+Also optionally (only required for building gtruth2circuit),
+[Gtk2Hs](http://projects.haskell.org/gtk2hs) can be used for drawing "proper" (non-ASCII-art)
+graphics.
+
 Building
 --------
 Using GHC:
 
 	ghc -isrc --make src/truth2circuit.hs -o truth2circuit
+	ghc -isrc --make src/gtruth2circuit.hs -o gtruth2circuit
 
 This just builds the executable in the current path. If you also want an automated installation
-(only the executable at the moment), you can use Cabal:
+(only the executables at the moment), you can use Cabal:
 
 	sudo cabal install --prefix=/usr/local
 
@@ -90,4 +95,9 @@ The executable `truth2circuit` acts a filter, i.e. it expects the truth table to
 STDIN and writes results to STDOUT. For example:
 
 	cat examples/simple.tt | truth2circuit
+
+The gui/gtk variante gtruth2circuit works the same way, except that it opens a window displaying the
+result instead of writing anything to STDOUT.
+
+	cat examples/simple.tt | gtruth2circuit
 
